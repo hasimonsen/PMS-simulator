@@ -12,6 +12,10 @@ const translations = {
     language: 'Language',
     locked: 'Locked',
     level: 'Level',
+    difficulty: 'Difficulty',
+    'difficulty.student': 'Student',
+    'difficulty.apprentice': 'Apprentice',
+    'difficulty.eto': 'ETO',
 
     // Game
     score: 'Score',
@@ -236,6 +240,10 @@ const translations = {
     language: 'Spr\u00e5k',
     locked: 'L\u00e5st',
     level: 'Niv\u00e5',
+    difficulty: 'Vanskelighetsgrad',
+    'difficulty.student': 'Elev',
+    'difficulty.apprentice': 'L\u00e6rling',
+    'difficulty.eto': 'ETO',
 
     // Game
     score: 'Poeng',

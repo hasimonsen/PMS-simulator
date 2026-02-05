@@ -5,32 +5,46 @@ import { useSettings } from '../context/SettingsContext';
 import LanguageToggle from '../components/LanguageToggle';
 
 const LEVELS = [
-  { id: 1, key: 'level.1', difficulty: 1 },
-  { id: 2, key: 'level.2', difficulty: 1 },
-  { id: 3, key: 'level.3', difficulty: 2 },
-  { id: '4a', key: 'level.4a', difficulty: 3 },
-  { id: '4b', key: 'level.4b', difficulty: 3 },
-  { id: 5, key: 'level.5', difficulty: 2 },
-  { id: 6, key: 'level.6', difficulty: 2 },
-  { id: 7, key: 'level.7', difficulty: 3 },
-  { id: 8, key: 'level.8', difficulty: 3 },
-  { id: 9, key: 'level.9', difficulty: 4 },
-  { id: 10, key: 'level.10', difficulty: 4 },
-  { id: 11, key: 'level.11', difficulty: 4 },
-  { id: 12, key: 'level.12', difficulty: 5 },
-  { id: 13, key: 'level.13', difficulty: 5 },
+  { id: 1, key: 'level.1', difficulty: 'student' },
+  { id: 2, key: 'level.2', difficulty: 'student' },
+  { id: 3, key: 'level.3', difficulty: 'student' },
+  { id: '4a', key: 'level.4a', difficulty: 'apprentice' },
+  { id: '4b', key: 'level.4b', difficulty: 'apprentice' },
+  { id: 5, key: 'level.5', difficulty: 'apprentice' },
+  { id: 6, key: 'level.6', difficulty: 'apprentice' },
+  { id: 7, key: 'level.7', difficulty: 'apprentice' },
+  { id: 8, key: 'level.8', difficulty: 'apprentice' },
+  { id: 9, key: 'level.9', difficulty: 'eto' },
+  { id: 10, key: 'level.10', difficulty: 'eto' },
+  { id: 11, key: 'level.11', difficulty: 'eto' },
+  { id: 12, key: 'level.12', difficulty: 'eto' },
+  { id: 13, key: 'level.13', difficulty: 'eto' },
 ];
 
-function DifficultyStars({ count }) {
-  const stars = [];
-  for (let i = 0; i < 5; i++) {
-    stars.push(
-      <span key={i} style={{ color: i < count ? '#f5c518' : '#444' }}>
-        &#9733;
-      </span>
-    );
-  }
-  return <div className="level-card__stars">{stars}</div>;
+const DIFFICULTY_COLORS = {
+  student: { bg: '#1b3a2a', border: '#4caf50', text: '#66bb6a' },
+  apprentice: { bg: '#3a351b', border: '#ff9800', text: '#ffb74d' },
+  eto: { bg: '#3a1b1b', border: '#f44336', text: '#ef5350' },
+};
+
+function DifficultyBadge({ difficulty, t }) {
+  const colors = DIFFICULTY_COLORS[difficulty] || DIFFICULTY_COLORS.student;
+  return (
+    <div style={{
+      display: 'inline-block',
+      padding: '2px 10px',
+      borderRadius: 4,
+      fontSize: 11,
+      fontWeight: 700,
+      textTransform: 'uppercase',
+      letterSpacing: 1,
+      background: colors.bg,
+      border: `1px solid ${colors.border}`,
+      color: colors.text,
+    }}>
+      {t(`difficulty.${difficulty}`)}
+    </div>
+  );
 }
 
 export default function MainMenu() {
@@ -106,7 +120,7 @@ export default function MainMenu() {
               <div style={styles.levelName}>
                 {t(`${level.key}.name`)}
               </div>
-              <DifficultyStars count={level.difficulty} />
+              <DifficultyBadge difficulty={level.difficulty} t={t} />
               {!unlocked && (
                 <div style={styles.lockedOverlay}>
                   <span style={styles.lockedText}>{t('locked')}</span>

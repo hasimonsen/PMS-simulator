@@ -1089,6 +1089,21 @@ class PMSEngine {
   }
 
   /**
+   * Force main bus voltage (for level setup, e.g., dead bus = 0).
+   */
+  forceBusVoltage(v) {
+    this.mainBus.voltage = v;
+    this.mainBus.live = v > 50;
+  }
+
+  /**
+   * Force main bus frequency (for level setup, e.g., dead bus = 0).
+   */
+  forceBusFrequency(f) {
+    this.mainBus.frequency = f;
+  }
+
+  /**
    * Set sync mode hint (unused by engine, for UI hints).
    */
   setSyncMode(mode) {

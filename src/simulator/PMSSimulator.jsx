@@ -2,9 +2,7 @@ import React, { useState } from 'react';
 import { useGame } from '../context/GameContext';
 import { useLang } from '../context/LangContext';
 import Generator from './Generator';
-import EmergencyGen from './EmergencyGen';
 import Busbar from './Busbar';
-import EmergencyBus from './EmergencyBus';
 import Synchroscope from './Synchroscope';
 import BreakerPanel from './BreakerPanel';
 import GovernorPanel from './GovernorPanel';
@@ -31,21 +29,12 @@ export default function PMSSimulator() {
         ))}
       </div>
 
-      {/* Middle row: Busbar diagram + Emergency section */}
+      {/* Middle row: Unified busbar diagram (includes emergency) */}
       <div className="pms-simulator__middle">
-        <div className="pms-simulator__busbar-section">
-          <Busbar
-            selectedGen={selectedGen}
-            onSelectGen={setSelectedGen}
-          />
-        </div>
-        <div className="pms-simulator__emergency-section">
-          <EmergencyGen
-            selected={selectedGen === 'EMG'}
-            onSelect={() => setSelectedGen('EMG')}
-          />
-          <EmergencyBus />
-        </div>
+        <Busbar
+          selectedGen={selectedGen}
+          onSelectGen={setSelectedGen}
+        />
       </div>
 
       {/* Bottom row: Active generator control panels */}

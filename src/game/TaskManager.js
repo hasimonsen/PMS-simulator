@@ -50,10 +50,11 @@ export default class TaskManager {
         engine.forceGeneratorState(genId, {
           state: genSetup.state || 'OFF',
           breakerState: genSetup.breakerState || 'OPEN',
-          governorMode: genSetup.governorMode || 'droop',
+          speedMode: genSetup.speedMode || genSetup.governorMode || 'droop',
           speedSetpoint: genSetup.speedSetpoint !== undefined ? genSetup.speedSetpoint : 1.0,
           voltageSetpoint: genSetup.voltageSetpoint !== undefined ? genSetup.voltageSetpoint : 1.0,
-          loadSharingComms: genSetup.loadSharingComms !== undefined ? genSetup.loadSharingComms : false,
+          droopPercent: genSetup.droopPercent,
+          isoCommsEnabled: genSetup.isoCommsEnabled !== undefined ? genSetup.isoCommsEnabled : (genSetup.loadSharingComms !== undefined ? genSetup.loadSharingComms : false),
           autoStart: genSetup.autoStart !== undefined ? genSetup.autoStart : false,
         });
       }
@@ -122,7 +123,7 @@ export default class TaskManager {
         break;
 
       case 'emg_auto_start':
-        engine.startEmergencyGenerator();
+        engine.startGenerator('EMG');
         break;
 
       case 'load_step':
@@ -130,7 +131,7 @@ export default class TaskManager {
         break;
 
       case 'breaker_trip':
-        engine.tripBreaker(event.target, event.reason || 'trip.overcurrent');
+        engine.tripGenerator(event.target, event.reason || 'overcurrent');
         break;
 
       default:

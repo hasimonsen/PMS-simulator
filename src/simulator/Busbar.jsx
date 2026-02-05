@@ -1,211 +1,642 @@
-import React from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { useGame } from '../context/GameContext';
 import { useLang } from '../context/LangContext';
 
-const GENERATORS = ['DG1', 'DG2', 'DG3', 'SG'];
-const GEN_POSITIONS = {
-  DG1: { x: 80 },
-  DG2: { x: 230 },
-  DG3: { x: 380 },
-  SG: { x: 530 },
-};
+/* ── Layout constants ─────────────────────────────────────────────── */
+const MAIN_GENS = ['DG1', 'DG2', 'DG3', 'SG'];
+const GEN_X = { DG1: 110, DG2: 270, DG3: 430, SG: 590 };
+const EMG_X = 900;
 
-const BUS_Y = 120;
-const GEN_Y = 30;
-const BREAKER_SIZE = 20;
+const ENGINE_Y = 18;
+const ENGINE_W = 48;
+const ENGINE_H = 26;
+const GEN_Y = 75;
+const GEN_R = 24;
+const BRK_Y = 130;
+const BRK_SZ = 22;
+const BUS_Y = 175;
+
+const BUS_TIE_X = 750;
+const EMG_BUS_START = 800;
+const EMG_BUS_END = 1000;
+const LOAD_Y = 215;
+
+const SVG_W = 1060;
+const SVG_H = 270;
+
+/* ── Colors ───────────────────────────────────────────────────────── */
+const C_GREEN = '#00ff88';
+const C_GREEN_DIM = '#00cc6a';
+const C_RED = '#ff4444';
+const C_RED_DIM = '#d9534f';
+const C_AMBER = '#ffaa00';
+const C_GRAY = '#3a4a5e';
+const C_GRAY_LIGHT = '#7a8a9e';
+const C_TEXT = '#c8d6e5';
 
 export default function Busbar({ selectedGen, onSelectGen }) {
-  const { engineState, closeBreaker, openBreaker } = useGame();
+  const {
+    engineState,
+    startGenerator, stopGenerator,
+    closeBreaker, openBreaker, resetBreaker,
+    autoSync, setBusTie,
+  } = useGame();
   const { t } = useLang();
+  const containerRef = useRef(null);
+  const [popup, setPopup] = useState(null);
 
+  /* ── Data ────────────────────────────────────────────────────────── */
   const bus = engineState?.mainBus;
+  const emBus = engineState?.emergencyBus;
+  const gens = engineState?.generators || {};
   const busLive = bus?.live ?? false;
-  const busColor = busLive ? '#5cb85c' : '#888';
+  const emBusLive = emBus?.live ?? false;
+  const busTieClosed = emBus?.busTieClosed ?? false;
+
+  const busColor = busLive ? C_GREEN : C_GRAY;
+  const emBusColor = emBusLive ? C_AMBER : C_GRAY;
 
   const busVoltage = Math.round(bus?.voltage || 0);
-  const busFrequency = (bus?.frequency || 0).toFixed(1);
+  const busFreq = (bus?.frequency || 0).toFixed(1);
   const totalLoad = Math.round(bus?.totalLoad || 0);
-  const totalGeneration = Math.round(bus?.totalGeneration || 0);
 
-  // Compute total online capacity from generators for the load bar
-  const onlineGens = Object.values(engineState?.generators || {}).filter(
+  const emVoltage = Math.round(emBus?.voltage || 0);
+  const emFreq = (emBus?.frequency || 0).toFixed(1);
+  const emLoad = Math.round(emBus?.totalLoad || 0);
+
+  // Load bar
+  const onlineGens = Object.values(gens).filter(
     (g) => !g.isEmergency && g.state === 'RUNNING' && g.breakerState === 'CLOSED'
   );
-  const totalCapacity = onlineGens.reduce((sum, g) => sum + (g.capacity || 0), 0) || 1;
-  const loadBarPercent = Math.min((totalLoad / totalCapacity) * 100, 100);
+  const totalCap = onlineGens.reduce((s, g) => s + (g.capacity || 0), 0) || 1;
+  const loadPct = Math.min((totalLoad / totalCap) * 100, 100);
 
-  function renderBreakerSymbol(genId, cx, cy) {
-    const gen = engineState?.generators?.[genId];
-    const breakerStatus = gen?.breakerState || 'OPEN';
-    const isClosed = breakerStatus === 'CLOSED';
-    const isTripped = breakerStatus === 'TRIPPED';
+  /* ── Popup helpers ──────────────────────────────────────────────── */
+  const openPopup = useCallback((e, type, genId) => {
+    e.stopPropagation();
+    if (onSelectGen) onSelectGen(genId);
+    const rect = containerRef.current.getBoundingClientRect();
+    setPopup({
+      type, genId,
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    });
+  }, [onSelectGen]);
 
-    const half = BREAKER_SIZE / 2;
+  const closePopup = useCallback(() => setPopup(null), []);
 
-    let strokeColor = '#d9534f'; // red = open
-    if (isClosed) strokeColor = '#5cb85c'; // green = closed
-    if (isTripped) strokeColor = '#ff4444'; // bright red = tripped
+  /* ── Helper: state color ────────────────────────────────────────── */
+  function stateColor(state) {
+    if (state === 'RUNNING') return C_GREEN;
+    if (state === 'IDLE') return '#4488ff';
+    if (['PRE_LUBE', 'CRANKING', 'COOL_DOWN'].includes(state)) return C_AMBER;
+    return C_GRAY;
+  }
 
+  function breakerColor(brk) {
+    if (brk === 'CLOSED') return C_GREEN;
+    if (brk === 'TRIPPED') return C_RED;
+    return C_RED_DIM;
+  }
+
+  /* ── SVG: Engine symbol ─────────────────────────────────────────── */
+  function renderEngine(cx, genId) {
+    const gen = gens[genId];
+    const running = gen?.state === 'RUNNING' || gen?.state === 'IDLE';
+    const color = running ? C_GREEN_DIM : C_GRAY;
     return (
       <g
-        className="busbar__breaker-symbol"
-        onClick={(e) => {
-          e.stopPropagation();
-          if (onSelectGen) onSelectGen(genId);
-        }}
         style={{ cursor: 'pointer' }}
+        onClick={(e) => openPopup(e, 'engine', genId)}
       >
-        {/* Breaker square */}
         <rect
-          x={cx - half}
-          y={cy - half}
-          width={BREAKER_SIZE}
-          height={BREAKER_SIZE}
-          fill="none"
-          stroke={strokeColor}
-          strokeWidth={2}
+          x={cx - ENGINE_W / 2} y={ENGINE_Y - ENGINE_H / 2}
+          width={ENGINE_W} height={ENGINE_H}
+          rx={3} ry={3}
+          fill="none" stroke={color} strokeWidth={1.5}
         />
-        {/* X when closed */}
-        {isClosed && (
-          <>
-            <line
-              x1={cx - half} y1={cy - half}
-              x2={cx + half} y2={cy + half}
-              stroke={strokeColor} strokeWidth={2}
-            />
-            <line
-              x1={cx + half} y1={cy - half}
-              x2={cx - half} y2={cy + half}
-              stroke={strokeColor} strokeWidth={2}
-            />
-          </>
-        )}
-        {/* Flashing effect for tripped */}
-        {isTripped && (
-          <rect
-            x={cx - half}
-            y={cy - half}
-            width={BREAKER_SIZE}
-            height={BREAKER_SIZE}
-            fill="rgba(255,0,0,0.3)"
-            stroke="none"
-          >
-            <animate
-              attributeName="opacity"
-              values="1;0;1"
-              dur="0.8s"
-              repeatCount="indefinite"
-            />
-          </rect>
-        )}
+        <text
+          x={cx} y={ENGINE_Y + 1}
+          textAnchor="middle" dominantBaseline="middle"
+          fill={color} fontSize="9" fontFamily="monospace" fontWeight="bold"
+        >
+          {genId === 'EMG' ? 'EMG ENG' : genId === 'SG' ? 'SHAFT' : 'DIESEL'}
+        </text>
+        {/* Connection line engine → generator */}
+        <line
+          x1={cx} y1={ENGINE_Y + ENGINE_H / 2}
+          x2={cx} y2={GEN_Y - GEN_R}
+          stroke={color} strokeWidth={2}
+        />
       </g>
     );
   }
 
-  return (
-    <div className="busbar">
-      <div className="busbar__title">{t('mainBus')}</div>
+  /* ── SVG: Generator circle ──────────────────────────────────────── */
+  function renderGenerator(cx, genId) {
+    const gen = gens[genId];
+    const color = stateColor(gen?.state);
+    const isSelected = selectedGen === genId;
+    const label = genId === 'SG' ? 'SG' : genId === 'EMG' ? 'EMG' : genId.replace('DG', 'G');
+    return (
+      <g
+        style={{ cursor: 'pointer' }}
+        onClick={(e) => openPopup(e, 'generator', genId)}
+      >
+        {/* Selection ring */}
+        {isSelected && (
+          <circle
+            cx={cx} cy={GEN_Y} r={GEN_R + 4}
+            fill="none" stroke={C_GREEN} strokeWidth={1}
+            strokeDasharray="4 3" opacity={0.7}
+          />
+        )}
+        <circle
+          cx={cx} cy={GEN_Y} r={GEN_R}
+          fill="none" stroke={color} strokeWidth={2.5}
+        />
+        {/* G symbol */}
+        <text
+          x={cx} y={GEN_Y - 4}
+          textAnchor="middle" dominantBaseline="middle"
+          fill={color} fontSize="9" fontWeight="bold" fontFamily="monospace"
+        >
+          G
+        </text>
+        <text
+          x={cx} y={GEN_Y + 9}
+          textAnchor="middle" dominantBaseline="middle"
+          fill={color} fontSize="11" fontWeight="bold" fontFamily="monospace"
+        >
+          {label}
+        </text>
+        {/* Connection to breaker */}
+        <line
+          x1={cx} y1={GEN_Y + GEN_R}
+          x2={cx} y2={BRK_Y - BRK_SZ / 2}
+          stroke={color} strokeWidth={2}
+        />
+      </g>
+    );
+  }
 
+  /* ── SVG: Breaker symbol ────────────────────────────────────────── */
+  function renderBreaker(cx, genId, busY = BUS_Y) {
+    const gen = gens[genId];
+    const brk = gen?.breakerState || 'OPEN';
+    const color = breakerColor(brk);
+    const half = BRK_SZ / 2;
+
+    return (
+      <g
+        style={{ cursor: 'pointer' }}
+        onClick={(e) => openPopup(e, 'breaker', genId)}
+      >
+        <rect
+          x={cx - half} y={BRK_Y - half}
+          width={BRK_SZ} height={BRK_SZ}
+          fill="none" stroke={color} strokeWidth={2}
+        />
+        {brk === 'CLOSED' && (
+          <>
+            <line x1={cx - half} y1={BRK_Y - half} x2={cx + half} y2={BRK_Y + half} stroke={color} strokeWidth={2} />
+            <line x1={cx + half} y1={BRK_Y - half} x2={cx - half} y2={BRK_Y + half} stroke={color} strokeWidth={2} />
+          </>
+        )}
+        {brk === 'TRIPPED' && (
+          <rect
+            x={cx - half} y={BRK_Y - half}
+            width={BRK_SZ} height={BRK_SZ}
+            fill="rgba(255,0,0,0.3)" stroke="none"
+          >
+            <animate attributeName="opacity" values="1;0;1" dur="0.8s" repeatCount="indefinite" />
+          </rect>
+        )}
+        {/* Connection breaker → bus */}
+        <line
+          x1={cx} y1={BRK_Y + half}
+          x2={cx} y2={busY}
+          stroke={brk === 'CLOSED' ? busColor : C_GRAY} strokeWidth={2}
+        />
+      </g>
+    );
+  }
+
+  /* ── SVG: Bus-tie breaker (horizontal) ──────────────────────────── */
+  function renderBusTie() {
+    const half = BRK_SZ / 2;
+    const color = busTieClosed ? C_GREEN : C_RED_DIM;
+    return (
+      <g
+        style={{ cursor: 'pointer' }}
+        onClick={(e) => openPopup(e, 'bustie', 'BUS_TIE')}
+      >
+        <rect
+          x={BUS_TIE_X - half} y={BUS_Y - half}
+          width={BRK_SZ} height={BRK_SZ}
+          fill="none" stroke={color} strokeWidth={2}
+        />
+        {busTieClosed && (
+          <>
+            <line x1={BUS_TIE_X - half} y1={BUS_Y - half} x2={BUS_TIE_X + half} y2={BUS_Y + half} stroke={color} strokeWidth={2} />
+            <line x1={BUS_TIE_X + half} y1={BUS_Y - half} x2={BUS_TIE_X - half} y2={BUS_Y + half} stroke={color} strokeWidth={2} />
+          </>
+        )}
+        <text
+          x={BUS_TIE_X} y={BUS_Y - half - 6}
+          textAnchor="middle" fill={C_GRAY_LIGHT} fontSize="8" fontFamily="monospace"
+        >
+          BUS TIE
+        </text>
+      </g>
+    );
+  }
+
+  /* ── SVG: Emergency loads ───────────────────────────────────────── */
+  function renderEmergencyLoads() {
+    const loads = [
+      { name: 'LTG', x: 840 },
+      { name: 'NAV', x: 910 },
+      { name: 'STR', x: 980 },
+    ];
+    return loads.map(({ name, x }) => (
+      <g key={name}>
+        <line x1={x} y1={BUS_Y} x2={x} y2={LOAD_Y} stroke={emBusLive ? C_AMBER : C_GRAY} strokeWidth={1.5} />
+        <rect
+          x={x - 16} y={LOAD_Y}
+          width={32} height={18}
+          rx={2} fill={emBusLive ? 'rgba(255,170,0,0.15)' : 'rgba(60,70,85,0.3)'}
+          stroke={emBusLive ? C_AMBER : C_GRAY} strokeWidth={1}
+        />
+        <text
+          x={x} y={LOAD_Y + 10}
+          textAnchor="middle" dominantBaseline="middle"
+          fill={emBusLive ? C_AMBER : C_GRAY} fontSize="8" fontFamily="monospace" fontWeight="bold"
+        >
+          {name}
+        </text>
+      </g>
+    ));
+  }
+
+  /* ── Popup content ──────────────────────────────────────────────── */
+  function renderPopup() {
+    if (!popup) return null;
+    const { type, genId, x, y } = popup;
+    const gen = gens[genId];
+
+    // Clamp popup position to stay visible
+    const popupW = 220;
+    const containerW = containerRef.current?.offsetWidth || 800;
+    const containerH = containerRef.current?.offsetHeight || 400;
+    let px = Math.min(x + 10, containerW - popupW - 10);
+    let py = Math.min(y + 10, containerH - 200);
+    if (px < 10) px = 10;
+    if (py < 10) py = 10;
+
+    return (
+      <div
+        className="busbar-popup"
+        style={{ left: px, top: py }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="busbar-popup__header">
+          <span className="busbar-popup__title">
+            {type === 'engine' && `Engine — ${genId}`}
+            {type === 'generator' && `Generator — ${genId}`}
+            {type === 'breaker' && `Breaker — ${genId}`}
+            {type === 'bustie' && 'Bus Tie Breaker'}
+          </span>
+          <button className="busbar-popup__close" onClick={closePopup}>×</button>
+        </div>
+
+        <div className="busbar-popup__body">
+          {/* ── Generator popup ──────────────────────── */}
+          {type === 'generator' && gen && (
+            <>
+              <div className="busbar-popup__readings">
+                <div className="busbar-popup__row">
+                  <span className="busbar-popup__label">State</span>
+                  <span className="busbar-popup__value" style={{ color: stateColor(gen.state) }}>
+                    {gen.state?.replace('_', ' ') || 'OFF'}
+                  </span>
+                </div>
+                <div className="busbar-popup__row">
+                  <span className="busbar-popup__label">RPM</span>
+                  <span className="busbar-popup__value">{Math.round(gen.rpm || 0)}</span>
+                </div>
+                <div className="busbar-popup__row">
+                  <span className="busbar-popup__label">Voltage</span>
+                  <span className="busbar-popup__value">{Math.round(gen.voltage || 0)} V</span>
+                </div>
+                <div className="busbar-popup__row">
+                  <span className="busbar-popup__label">Frequency</span>
+                  <span className="busbar-popup__value">{(gen.frequency || 0).toFixed(1)} Hz</span>
+                </div>
+                <div className="busbar-popup__row">
+                  <span className="busbar-popup__label">Power</span>
+                  <span className="busbar-popup__value">{Math.round(gen.activePower || 0)} kW</span>
+                </div>
+              </div>
+              <div className="busbar-popup__actions">
+                <button
+                  className="busbar-popup__btn busbar-popup__btn--start"
+                  onClick={() => startGenerator(genId)}
+                  disabled={gen.state !== 'OFF'}
+                >
+                  START
+                </button>
+                <button
+                  className="busbar-popup__btn busbar-popup__btn--stop"
+                  onClick={() => stopGenerator(genId)}
+                  disabled={gen.state === 'OFF'}
+                >
+                  STOP
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* ── Engine / Governor popup ──────────────── */}
+          {type === 'engine' && gen && (
+            <>
+              <div className="busbar-popup__readings">
+                <div className="busbar-popup__row">
+                  <span className="busbar-popup__label">RPM</span>
+                  <span className="busbar-popup__value">{Math.round(gen.rpm || 0)}</span>
+                </div>
+                <div className="busbar-popup__row">
+                  <span className="busbar-popup__label">Frequency</span>
+                  <span className="busbar-popup__value">{(gen.frequency || 0).toFixed(1)} Hz</span>
+                </div>
+                <div className="busbar-popup__row">
+                  <span className="busbar-popup__label">Mode</span>
+                  <span className="busbar-popup__value" style={{ textTransform: 'capitalize' }}>
+                    {gen.speedMode || 'droop'}
+                  </span>
+                </div>
+                <div className="busbar-popup__row">
+                  <span className="busbar-popup__label">Setpoint</span>
+                  <span className="busbar-popup__value">{Math.round(gen.governorSetpoint || 0)} RPM</span>
+                </div>
+                <div className="busbar-popup__row">
+                  <span className="busbar-popup__label">Droop</span>
+                  <span className="busbar-popup__value">{(gen.droopPercent || 0).toFixed(1)}%</span>
+                </div>
+              </div>
+              <div className="busbar-popup__actions">
+                <button
+                  className="busbar-popup__btn busbar-popup__btn--start"
+                  onClick={() => startGenerator(genId)}
+                  disabled={gen.state !== 'OFF'}
+                >
+                  START
+                </button>
+                <button
+                  className="busbar-popup__btn busbar-popup__btn--stop"
+                  onClick={() => stopGenerator(genId)}
+                  disabled={gen.state === 'OFF'}
+                >
+                  STOP
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* ── Breaker popup ────────────────────────── */}
+          {type === 'breaker' && gen && (
+            <>
+              <div className="busbar-popup__readings">
+                <div className="busbar-popup__row">
+                  <span className="busbar-popup__label">State</span>
+                  <span className="busbar-popup__value" style={{ color: breakerColor(gen.breakerState) }}>
+                    {gen.breakerState || 'OPEN'}
+                  </span>
+                </div>
+                {gen.breakerState === 'TRIPPED' && gen.tripReason && (
+                  <div className="busbar-popup__row">
+                    <span className="busbar-popup__label">Trip Reason</span>
+                    <span className="busbar-popup__value" style={{ color: C_RED }}>
+                      {gen.tripReason}
+                    </span>
+                  </div>
+                )}
+              </div>
+              <div className="busbar-popup__actions">
+                <button
+                  className="busbar-popup__btn busbar-popup__btn--start"
+                  onClick={() => closeBreaker(genId)}
+                  disabled={gen.breakerState === 'CLOSED' || gen.breakerState === 'TRIPPED'}
+                >
+                  CLOSE
+                </button>
+                <button
+                  className="busbar-popup__btn busbar-popup__btn--stop"
+                  onClick={() => openBreaker(genId)}
+                  disabled={gen.breakerState !== 'CLOSED'}
+                >
+                  OPEN
+                </button>
+                <button
+                  className="busbar-popup__btn busbar-popup__btn--reset"
+                  onClick={() => resetBreaker(genId)}
+                  disabled={gen.breakerState !== 'TRIPPED'}
+                >
+                  RESET
+                </button>
+              </div>
+              <div className="busbar-popup__actions" style={{ marginTop: 4 }}>
+                <button
+                  className="busbar-popup__btn busbar-popup__btn--sync"
+                  onClick={() => autoSync(genId)}
+                  disabled={gen.breakerState === 'CLOSED' || gen.state !== 'RUNNING'}
+                >
+                  AUTO SYNC
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* ── Bus-tie popup ────────────────────────── */}
+          {type === 'bustie' && (
+            <>
+              <div className="busbar-popup__readings">
+                <div className="busbar-popup__row">
+                  <span className="busbar-popup__label">State</span>
+                  <span className="busbar-popup__value" style={{ color: busTieClosed ? C_GREEN : C_RED_DIM }}>
+                    {busTieClosed ? 'CLOSED' : 'OPEN'}
+                  </span>
+                </div>
+              </div>
+              <div className="busbar-popup__actions">
+                <button
+                  className="busbar-popup__btn busbar-popup__btn--start"
+                  onClick={() => setBusTie(true)}
+                  disabled={busTieClosed}
+                >
+                  CLOSE
+                </button>
+                <button
+                  className="busbar-popup__btn busbar-popup__btn--stop"
+                  onClick={() => setBusTie(false)}
+                  disabled={!busTieClosed}
+                >
+                  OPEN
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  /* ── Render ─────────────────────────────────────────────────────── */
+  return (
+    <div className="busbar" ref={containerRef} onClick={closePopup}>
       <svg
         className="busbar__diagram"
-        viewBox="0 0 640 200"
-        width="100%"
-        height="200"
+        viewBox={`0 0 ${SVG_W} ${SVG_H}`}
+        preserveAspectRatio="xMidYMid meet"
         xmlns="http://www.w3.org/2000/svg"
       >
-        {/* Main bus bar line */}
+        {/* ── Main generators ───────────────────────── */}
+        {MAIN_GENS.map((genId) => (
+          <g key={genId}>
+            {renderEngine(GEN_X[genId], genId)}
+            {renderGenerator(GEN_X[genId], genId)}
+            {renderBreaker(GEN_X[genId], genId)}
+          </g>
+        ))}
+
+        {/* ── Main bus line ─────────────────────────── */}
         <line
-          x1={40} y1={BUS_Y}
-          x2={600} y2={BUS_Y}
-          stroke={busColor}
-          strokeWidth={6}
-          strokeLinecap="round"
+          x1={70} y1={BUS_Y} x2={700} y2={BUS_Y}
+          stroke={busColor} strokeWidth={6} strokeLinecap="round"
+        />
+        {/* Main bus label */}
+        <text
+          x={385} y={BUS_Y + 16}
+          textAnchor="middle" fill={C_GRAY_LIGHT} fontSize="9" fontFamily="monospace"
+          letterSpacing="2"
+        >
+          MAIN BUS
+        </text>
+
+        {/* ── Main bus readings ─────────────────────── */}
+        <text x={160} y={BUS_Y + 30} textAnchor="middle" fill={C_TEXT} fontSize="11" fontFamily="monospace">
+          {busVoltage} V
+        </text>
+        <text x={385} y={BUS_Y + 30} textAnchor="middle" fill={C_TEXT} fontSize="11" fontFamily="monospace">
+          {busFreq} Hz
+        </text>
+        <text x={570} y={BUS_Y + 30} textAnchor="middle" fill={C_TEXT} fontSize="11" fontFamily="monospace">
+          {totalLoad} kW
+        </text>
+
+        {/* ── Connection main bus → bus tie ──────────── */}
+        <line
+          x1={700} y1={BUS_Y} x2={BUS_TIE_X - BRK_SZ / 2} y2={BUS_Y}
+          stroke={busLive ? C_GREEN_DIM : C_GRAY} strokeWidth={3}
         />
 
-        {/* Generator connections */}
-        {GENERATORS.map((genId) => {
-          const pos = GEN_POSITIONS[genId];
-          const gen = engineState?.generators?.[genId];
-          const isRunning = gen?.state === 'RUNNING';
-          const genColor = isRunning ? '#5cb85c' : '#888';
-          const breakerY = (GEN_Y + BUS_Y) / 2;
+        {/* ── Bus-tie breaker ───────────────────────── */}
+        {renderBusTie()}
 
+        {/* ── Connection bus tie → EMG bus ──────────── */}
+        <line
+          x1={BUS_TIE_X + BRK_SZ / 2} y1={BUS_Y} x2={EMG_BUS_START} y2={BUS_Y}
+          stroke={busTieClosed && busLive ? C_AMBER : C_GRAY} strokeWidth={3}
+        />
+
+        {/* ── Emergency bus line ─────────────────────── */}
+        <line
+          x1={EMG_BUS_START} y1={BUS_Y} x2={EMG_BUS_END} y2={BUS_Y}
+          stroke={emBusColor} strokeWidth={4} strokeLinecap="round"
+        />
+        <text
+          x={(EMG_BUS_START + EMG_BUS_END) / 2} y={BUS_Y - 10}
+          textAnchor="middle" fill={C_AMBER} fontSize="9" fontFamily="monospace"
+          letterSpacing="1.5" opacity={0.8}
+        >
+          EMG BUS
+        </text>
+
+        {/* ── EMG bus readings ──────────────────────── */}
+        <text x={EMG_BUS_START + 30} y={BUS_Y + 48} textAnchor="middle" fill={C_AMBER} fontSize="9" fontFamily="monospace" opacity={0.8}>
+          {emVoltage} V
+        </text>
+        <text x={(EMG_BUS_START + EMG_BUS_END) / 2} y={BUS_Y + 48} textAnchor="middle" fill={C_AMBER} fontSize="9" fontFamily="monospace" opacity={0.8}>
+          {emFreq} Hz
+        </text>
+        <text x={EMG_BUS_END - 30} y={BUS_Y + 48} textAnchor="middle" fill={C_AMBER} fontSize="9" fontFamily="monospace" opacity={0.8}>
+          {emLoad} kW
+        </text>
+
+        {/* ── EMG Generator ─────────────────────────── */}
+        {renderEngine(EMG_X, 'EMG')}
+        {renderGenerator(EMG_X, 'EMG')}
+        {(() => {
+          const emg = gens['EMG'];
+          const brk = emg?.breakerState || 'OPEN';
+          const color = breakerColor(brk);
+          const half = BRK_SZ / 2;
           return (
-            <g key={genId}>
-              {/* Generator icon (circle) */}
-              <circle
-                cx={pos.x}
-                cy={GEN_Y}
-                r={18}
-                fill="none"
-                stroke={genColor}
-                strokeWidth={2}
+            <g
+              style={{ cursor: 'pointer' }}
+              onClick={(e) => openPopup(e, 'breaker', 'EMG')}
+            >
+              <rect
+                x={EMG_X - half} y={BRK_Y - half}
+                width={BRK_SZ} height={BRK_SZ}
+                fill="none" stroke={color} strokeWidth={2}
               />
-              <text
-                x={pos.x}
-                y={GEN_Y + 1}
-                textAnchor="middle"
-                dominantBaseline="middle"
-                fill={genColor}
-                fontSize="11"
-                fontWeight="bold"
-                fontFamily="monospace"
-              >
-                {genId === 'SG' ? 'SG' : genId.replace('DG', 'G')}
-              </text>
-
-              {/* Connection line: generator to breaker */}
+              {brk === 'CLOSED' && (
+                <>
+                  <line x1={EMG_X - half} y1={BRK_Y - half} x2={EMG_X + half} y2={BRK_Y + half} stroke={color} strokeWidth={2} />
+                  <line x1={EMG_X + half} y1={BRK_Y - half} x2={EMG_X - half} y2={BRK_Y + half} stroke={color} strokeWidth={2} />
+                </>
+              )}
+              {brk === 'TRIPPED' && (
+                <rect
+                  x={EMG_X - half} y={BRK_Y - half}
+                  width={BRK_SZ} height={BRK_SZ}
+                  fill="rgba(255,0,0,0.3)" stroke="none"
+                >
+                  <animate attributeName="opacity" values="1;0;1" dur="0.8s" repeatCount="indefinite" />
+                </rect>
+              )}
+              {/* Connection breaker → EMG bus */}
               <line
-                x1={pos.x} y1={GEN_Y + 18}
-                x2={pos.x} y2={breakerY - BREAKER_SIZE / 2}
-                stroke={genColor}
-                strokeWidth={2}
-              />
-
-              {/* Breaker symbol */}
-              {renderBreakerSymbol(genId, pos.x, breakerY)}
-
-              {/* Connection line: breaker to bus */}
-              <line
-                x1={pos.x} y1={breakerY + BREAKER_SIZE / 2}
-                x2={pos.x} y2={BUS_Y}
-                stroke={busColor}
-                strokeWidth={2}
+                x1={EMG_X} y1={BRK_Y + half}
+                x2={EMG_X} y2={BUS_Y}
+                stroke={brk === 'CLOSED' ? emBusColor : C_GRAY} strokeWidth={2}
               />
             </g>
           );
-        })}
+        })()}
 
-        {/* Bus readings */}
-        <text x={320} y={BUS_Y + 25} textAnchor="middle" fill="#ccc" fontSize="12" fontFamily="monospace">
-          {t('busVoltage')}: {busVoltage} V
-        </text>
-        <text x={320} y={BUS_Y + 42} textAnchor="middle" fill="#ccc" fontSize="12" fontFamily="monospace">
-          {t('busFrequency')}: {busFrequency} Hz
-        </text>
-        <text x={320} y={BUS_Y + 59} textAnchor="middle" fill="#ccc" fontSize="12" fontFamily="monospace">
-          {t('totalLoad')}: {totalLoad} kW
-        </text>
+        {/* ── Emergency loads ───────────────────────── */}
+        {renderEmergencyLoads()}
       </svg>
 
-      {/* Load demand bar */}
+      {/* ── Load demand bar ───────────────────────── */}
       <div className="busbar__load-demand">
-        <span className="busbar__load-demand-label">{t('totalLoad')}: {totalLoad} kW</span>
+        <span className="busbar__load-demand-label">Total Load: {totalLoad} kW</span>
         <div className="busbar__load-demand-bar">
           <div
             className="busbar__load-demand-fill"
             style={{
-              width: `${loadBarPercent}%`,
+              width: `${loadPct}%`,
               backgroundColor:
-                loadBarPercent > 90
-                  ? '#d9534f'
-                  : loadBarPercent > 70
-                    ? '#f0ad4e'
-                    : '#5cb85c',
+                loadPct > 90 ? C_RED_DIM : loadPct > 70 ? C_AMBER : C_GREEN_DIM,
             }}
           />
         </div>
       </div>
+
+      {/* ── Popup ─────────────────────────────────── */}
+      {popup && renderPopup()}
     </div>
   );
 }

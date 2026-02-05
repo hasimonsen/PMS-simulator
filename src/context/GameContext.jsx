@@ -78,6 +78,7 @@ export function GameProvider({ children }) {
   const loopRef = useRef(null);
   const taskStartTimeRef = useRef(null);
   const alertTimersRef = useRef([]);
+  const busHasBeenLiveRef = useRef(false);
 
   // ---- Reactive state ----
   const [screen, setScreen] = useState('menu');
@@ -204,12 +205,19 @@ export function GameProvider({ children }) {
         return;
       }
 
-      // Check for blackout game-over (only if not a blackout recovery level)
+      // Track if bus has ever been live (so dead-bus start levels don't
+      // immediately trigger the blackout game-over timer)
+      if (snap.mainBus && snap.mainBus.live) {
+        busHasBeenLiveRef.current = true;
+      }
+
+      // Check for blackout game-over (only if not a blackout recovery level
+      // and bus was previously live -- i.e. power was *lost*, not never established)
       const currentTask = taskManager.getCurrentTask();
       const isBlackoutLevel = currentTask && (currentTask.key === '11' || currentTask.key === '12');
-      if (snap.blackout && !isBlackoutLevel && snap.simTime > 2) {
+      if (snap.blackout && !isBlackoutLevel && busHasBeenLiveRef.current) {
         // Give a grace period, then game over
-        if (snap.blackout && engine.blackoutTimer > 10) {
+        if (engine.blackoutTimer > 10) {
           stopLoop();
           setGameOverReason('Prolonged blackout - all power lost');
           setScreen('gameover');
@@ -312,6 +320,7 @@ export function GameProvider({ children }) {
     setAlerts([]);
     setTaskElapsed(0);
     taskStartTimeRef.current = Date.now();
+    busHasBeenLiveRef.current = false;
 
     // Take initial snapshot
     setEngineState(engine.getState());

@@ -77,8 +77,11 @@ const styles = {
   },
   simulatorArea: {
     flex: 1,
-    overflow: 'auto',
+    overflow: 'hidden',
     position: 'relative',
+    display: 'flex',
+    flexDirection: 'column',
+    minHeight: 0,
   },
   alertContainer: {
     position: 'fixed',

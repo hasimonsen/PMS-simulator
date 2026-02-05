@@ -558,10 +558,10 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   pointer-events: auto;
 }
 
-/* Task panel - top left */
+/* Task panel - bottom left, collapsible */
 .hud__task-panel {
   position: absolute;
-  top: 12px;
+  bottom: 12px;
   left: 12px;
   max-width: 350px;
   background: rgba(19, 25, 32, 0.92);
@@ -569,6 +569,35 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   border-radius: 8px;
   padding: 14px 16px;
   backdrop-filter: blur(6px);
+}
+
+.hud__task-panel--collapsed {
+  max-width: none;
+  padding: 6px 12px;
+}
+
+.hud__collapse-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 4px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: all var(--transition-fast);
+}
+
+.hud__collapse-btn:hover {
+  background: var(--color-bg-control);
+  color: var(--color-text);
 }
 
 .hud__task-title {
@@ -772,18 +801,53 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
 
 .pms-simulator {
   flex: 1;
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
-  grid-template-rows: auto 1fr auto;
-  grid-template-areas:
-    "gen1     gen2     gen3     gen4"
-    "busbar   busbar   busbar   emergency"
-    "governor synchro  breaker  avr";
+  display: flex;
+  flex-direction: column;
   gap: 6px;
   padding: 6px;
   overflow: hidden;
   background: var(--color-bg-base);
   min-height: 0;
+}
+
+/* Wrapper rows */
+.pms-simulator__generators {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.pms-simulator__middle {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.pms-simulator__controls {
+  flex-shrink: 0;
+}
+
+.pms-simulator__controls-header {
+  margin-bottom: 6px;
+}
+
+.pms-simulator__controls-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.pms-simulator__controls-panels {
+  display: flex;
+  gap: 6px;
+}
+
+.pms-simulator__controls-panels > * {
+  flex: 1;
+  min-width: 0;
 }
 
 /* ==========================================================================
@@ -802,10 +866,10 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   transition: border-color var(--transition-normal), box-shadow var(--transition-normal);
 }
 
-.generator-panel:nth-child(1) { grid-area: gen1; }
-.generator-panel:nth-child(2) { grid-area: gen2; }
-.generator-panel:nth-child(3) { grid-area: gen3; }
-.generator-panel:nth-child(4) { grid-area: gen4; }
+.pms-simulator__generators > .generator-panel {
+  flex: 1;
+  min-width: 0;
+}
 
 .generator-panel--selected {
   border-color: var(--color-green);
@@ -1029,7 +1093,6 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
    ========================================================================== */
 
 .emergency-gen {
-  grid-area: emergency;
   background: var(--color-bg-panel);
   border: 1px solid rgba(255, 170, 0, 0.3);
   border-radius: 6px;
@@ -1105,7 +1168,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
    ========================================================================== */
 
 .busbar {
-  grid-area: busbar;
+  flex: 1;
   background: var(--color-bg-panel);
   border: 1px solid var(--color-border);
   border-radius: 6px;
@@ -1117,6 +1180,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   gap: 10px;
   position: relative;
   min-height: 0;
+  min-width: 0;
 }
 
 .busbar__main-line {
@@ -1258,6 +1322,206 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   text-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
 }
 
+.busbar__title {
+  display: none;
+}
+
+.busbar__diagram {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.busbar__load-demand {
+  width: 100%;
+  max-width: 500px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.busbar__load-demand-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.busbar__load-demand-bar {
+  width: 100%;
+  height: 14px;
+  background: var(--color-bg-base);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.busbar__load-demand-fill {
+  height: 100%;
+  border-radius: 6px;
+  transition: width var(--transition-normal), background-color var(--transition-normal);
+}
+
+/* ==========================================================================
+   BUSBAR POPUP
+   ========================================================================== */
+
+.busbar-popup {
+  position: absolute;
+  z-index: 50;
+  min-width: 200px;
+  max-width: 240px;
+  background: var(--color-bg-panel);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 1px rgba(0, 255, 136, 0.15);
+  overflow: hidden;
+  animation: popup-in 0.15s ease-out;
+}
+
+@keyframes popup-in {
+  from { opacity: 0; transform: scale(0.95) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1)    translateY(0); }
+}
+
+.busbar-popup__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: rgba(0, 255, 136, 0.06);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.busbar-popup__title {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.busbar-popup__close {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0;
+}
+
+.busbar-popup__close:hover {
+  background: rgba(255, 68, 68, 0.15);
+  border-color: var(--color-red);
+  color: var(--color-red);
+}
+
+.busbar-popup__body {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.busbar-popup__readings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.busbar-popup__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.busbar-popup__label {
+  font-size: 10px;
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.busbar-popup__value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-green);
+}
+
+.busbar-popup__actions {
+  display: flex;
+  gap: 6px;
+}
+
+.busbar-popup__btn {
+  flex: 1;
+  padding: 5px 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-muted);
+  transition: all var(--transition-fast);
+}
+
+.busbar-popup__btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.busbar-popup__btn--start {
+  border-color: var(--color-green-dim);
+  color: var(--color-green);
+}
+
+.busbar-popup__btn--start:hover:not(:disabled) {
+  background: var(--color-green-bg);
+  box-shadow: var(--shadow-glow-green);
+}
+
+.busbar-popup__btn--stop {
+  border-color: var(--color-red-dim);
+  color: var(--color-red);
+}
+
+.busbar-popup__btn--stop:hover:not(:disabled) {
+  background: var(--color-red-bg);
+  box-shadow: var(--shadow-glow-red);
+}
+
+.busbar-popup__btn--reset {
+  border-color: var(--color-amber);
+  color: var(--color-amber);
+}
+
+.busbar-popup__btn--reset:hover:not(:disabled) {
+  background: rgba(255, 170, 0, 0.1);
+}
+
+.busbar-popup__btn--sync {
+  border-color: var(--color-blue);
+  color: var(--color-blue);
+}
+
+.busbar-popup__btn--sync:hover:not(:disabled) {
+  background: var(--color-blue-bg);
+}
+
 /* ==========================================================================
    EMERGENCY BUS
    ========================================================================== */
@@ -1357,7 +1621,6 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
    ========================================================================== */
 
 .synchroscope {
-  grid-area: synchro;
   background: var(--color-bg-panel);
   border: 1px solid var(--color-border);
   border-radius: 6px;
@@ -1495,7 +1758,6 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
    ========================================================================== */
 
 .breaker-panel {
-  grid-area: breaker;
   background: var(--color-bg-panel);
   border: 1px solid var(--color-border);
   border-radius: 6px;
@@ -1611,7 +1873,6 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
    ========================================================================== */
 
 .governor-panel {
-  grid-area: governor;
   background: var(--color-bg-panel);
   border: 1px solid var(--color-border);
   border-radius: 6px;
@@ -1735,7 +1996,6 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
    ========================================================================== */
 
 .avr-panel {
-  grid-area: avr;
   background: var(--color-bg-panel);
   border: 1px solid var(--color-border);
   border-radius: 6px;
