@@ -1,10 +1,11 @@
 // PMSEngine.js -- Power Management System Simulator Physics Engine
 // Pure JavaScript, no framework dependencies.
 //
-// Simulates a marine power plant with 4 main generators (DG1, DG2, DG3, SG),
-// 1 emergency generator (EMG), main busbar, emergency switchboard, protection
-// relays, droop / isochronous speed control, synchronisation physics, and
-// automatic emergency generator start on blackout.
+// Simulates a marine power plant with 4 main diesel generators (DG1, DG2, DG3, DG4),
+// 1 emergency generator (EMG), port/starboard busbars, emergency switchboard,
+// transformers, sub-switchboards, heavy consumers, protection relays,
+// droop / isochronous speed control, synchronisation physics, AVR with
+// excitation dynamics, and automatic emergency generator start on blackout.
 
 const DEG_TO_RAD = Math.PI / 180;
 const RAD_TO_DEG = 180 / Math.PI;
@@ -21,7 +22,7 @@ const DEFAULT_SETTINGS = Object.freeze({
   dg1Capacity: 1000,
   dg2Capacity: 1000,
   dg3Capacity: 1000,
-  sgCapacity: 1500,
+  dg4Capacity: 1500,
   emgCapacity: 500,
 
   defaultDroop: 4,
@@ -114,17 +115,18 @@ function clamp(v, lo, hi) {
 // ---------------------------------------------------------------------------
 // Create a fresh generator state object
 // ---------------------------------------------------------------------------
-function createGenerator(id, capacity, isEmergency, settings) {
+function createGenerator(id, capacity, isEmergency, settings, assignedBus) {
   const nominalRpm = (settings.nominalFrequency * 120) / settings.generatorPoles;
   // Each generator gets a slightly different governor time constant to model
   // realistic hunting behaviour in isochronous mode without comms.
-  const tauOffset = { DG1: -0.15, DG2: 0.0, DG3: 0.1, SG: 0.2, EMG: -0.05 };
+  const tauOffset = { DG1: -0.15, DG2: 0.0, DG3: 0.1, DG4: 0.2, EMG: -0.05 };
   const tau = settings.governorTimeConstant + (tauOffset[id] || 0);
 
   return {
     id,
     capacity,          // rated kW
     isEmergency,
+    assignedBus: assignedBus || null,
 
     state: GenState.OFF,
     stateTimer: 0,     // seconds spent in current state
@@ -150,6 +152,10 @@ function createGenerator(id, capacity, isEmergency, settings) {
 
     governorTau: tau,
     avrTau: settings.avrTimeConstant,
+
+    // AVR excitation dynamics
+    excitationLevel: 1.0,
+    excitationTau: 0.5,  // seconds for excitation response
 
     // Protection timers (accumulate time spent in fault condition)
     underFreqTimer: 0,
@@ -178,13 +184,13 @@ class PMSEngine {
     // Nominal RPM derived from frequency and poles
     this.nominalRpm = (s.nominalFrequency * 120) / s.generatorPoles;
 
-    // Create generators
+    // Create generators (assigned to port/stb buses)
     this.generators = {
-      DG1: createGenerator('DG1', s.dg1Capacity, false, s),
-      DG2: createGenerator('DG2', s.dg2Capacity, false, s),
-      DG3: createGenerator('DG3', s.dg3Capacity, false, s),
-      SG:  createGenerator('SG',  s.sgCapacity,  false, s),
-      EMG: createGenerator('EMG', s.emgCapacity, true,  s),
+      DG1: createGenerator('DG1', s.dg1Capacity, false, s, 'portBus'),
+      DG2: createGenerator('DG2', s.dg2Capacity, false, s, 'portBus'),
+      DG3: createGenerator('DG3', s.dg3Capacity, false, s, 'stbBus'),
+      DG4: createGenerator('DG4', s.dg4Capacity, false, s, 'stbBus'),
+      EMG: createGenerator('EMG', s.emgCapacity, true,  s, 'emergencyBus'),
     };
 
     // Main busbar
@@ -205,6 +211,73 @@ class PMSEngine {
       totalLoad: s.emergencyBaseLoad,
       busTieClosed: true,   // Normally closed when main bus is live
     };
+
+    // Port bus (DG1, DG2)
+    this.portBus = {
+      voltage: 0,
+      frequency: 0,
+      phaseAngle: 0,
+      totalLoad: 0,
+      totalGeneration: 0,
+      live: false,
+    };
+
+    // Starboard bus (DG3, DG4)
+    this.stbBus = {
+      voltage: 0,
+      frequency: 0,
+      phaseAngle: 0,
+      totalLoad: 0,
+      totalGeneration: 0,
+      live: false,
+    };
+
+    // Port-Starboard bus-tie breaker
+    this.busTie = {
+      closed: true,  // When closed, port and stb buses are interconnected
+    };
+
+    // Transformers
+    this.transformers = {
+      T1: { id: 'T1', name: 'Port Crane/ROV', primaryBus: 'portBus', secondaryBus: 'port450Bus', ratio: 690 / 450, capacity: 500, breakerState: BreakerState.OPEN },
+      T2: { id: 'T2', name: 'Stb Crane/ROV', primaryBus: 'stbBus', secondaryBus: 'stb450Bus', ratio: 690 / 450, capacity: 500, breakerState: BreakerState.OPEN },
+      T3: { id: 'T3', name: 'EMG 230V', primaryBus: 'emergencyBus', secondaryBus: 'emg230Bus', ratio: 690 / 230, capacity: 200, breakerState: BreakerState.OPEN },
+      T4: { id: 'T4', name: '110V SWBD', primaryBus: 'emg230Bus', secondaryBus: 'dc110Bus', ratio: 230 / 110, capacity: 50, breakerState: BreakerState.OPEN },
+    };
+
+    // Sub-buses (fed via transformers)
+    this.subBuses = {
+      port450Bus: { voltage: 0, frequency: 0, live: false, nominalVoltage: 450 },
+      stb450Bus:  { voltage: 0, frequency: 0, live: false, nominalVoltage: 450 },
+      emg230Bus:  { voltage: 0, frequency: 0, live: false, nominalVoltage: 230 },
+      dc110Bus:   { voltage: 0, frequency: 0, live: false, nominalVoltage: 110 },
+    };
+
+    // Heavy consumers (all disabled by default for backward compat)
+    this.heavyConsumers = {
+      thrusterST: { id: 'thrusterST', name: 'Bow Thr. Port',   bus: 'portBus',    maxKw: 600, profile: 'sinusoidal', enabled: false, breakerState: BreakerState.OPEN, currentLoad: 0, hasVSD: true },
+      thrusterMT: { id: 'thrusterMT', name: 'Stern Thr. Port', bus: 'portBus',    maxKw: 500, profile: 'sinusoidal', enabled: false, breakerState: BreakerState.OPEN, currentLoad: 0, hasVSD: true },
+      thrusterBT: { id: 'thrusterBT', name: 'Bow Thr. Stb',    bus: 'stbBus',     maxKw: 600, profile: 'sinusoidal', enabled: false, breakerState: BreakerState.OPEN, currentLoad: 0, hasVSD: true },
+      thrusterAZ: { id: 'thrusterAZ', name: 'Azimuth Thr.',     bus: 'stbBus',     maxKw: 800, profile: 'sinusoidal', enabled: false, breakerState: BreakerState.OPEN, currentLoad: 0, hasVSD: true },
+      crane1:     { id: 'crane1',     name: 'Port Crane',       bus: 'port450Bus', maxKw: 200, profile: 'step',       enabled: false, breakerState: BreakerState.OPEN, currentLoad: 0, hasVSD: false },
+      crane2:     { id: 'crane2',     name: 'Stb Crane',        bus: 'stb450Bus',  maxKw: 200, profile: 'step',       enabled: false, breakerState: BreakerState.OPEN, currentLoad: 0, hasVSD: false },
+      rov1:       { id: 'rov1',       name: 'ROV 1',            bus: 'port450Bus', maxKw: 150, profile: 'constant',   enabled: false, breakerState: BreakerState.OPEN, currentLoad: 0, hasVSD: false },
+      rov2:       { id: 'rov2',       name: 'ROV 2',            bus: 'stb450Bus',  maxKw: 150, profile: 'constant',   enabled: false, breakerState: BreakerState.OPEN, currentLoad: 0, hasVSD: false },
+    };
+
+    // Shore connection
+    this.shoreConnection = {
+      available: true,
+      breakerState: BreakerState.OPEN,
+      voltage: 690,
+      frequency: 60,
+      maxPower: 2000,
+    };
+
+    // Consumer load profile internal state
+    this._consumerPhase = {};
+    this._consumerStepTimer = {};
+    this._consumerStepTarget = {};
 
     // Alerts / events
     this.alerts = [];       // { time, severity, message }
@@ -241,26 +314,35 @@ class PMSEngine {
     // 1. Update load noise
     this._updateLoadNoise(dt);
 
-    // 2. Tick each generator (state machine, governor, AVR, phase)
+    // 2. Compute heavy consumer loads
+    this._computeHeavyConsumers(dt);
+
+    // 3. Tick each generator (state machine, governor, AVR, phase)
     for (const id of Object.keys(this.generators)) {
       this._tickGenerator(this.generators[id], dt);
     }
 
-    // 3. Compute main bus aggregates
+    // 4. Compute port/stb bus aggregates
+    this._computePortStbBuses(dt);
+
+    // 5. Compute main bus aggregate (port+stb combined, backward compat)
     this._computeMainBus(dt);
 
-    // 4. Compute emergency bus
+    // 6. Compute emergency bus
     this._computeEmergencyBus(dt);
 
-    // 5. Distribute load among online generators (main bus)
+    // 7. Compute sub-buses (transformers)
+    this._computeSubBuses(dt);
+
+    // 8. Distribute load among online generators (main bus)
     this._distributeLoad(dt);
 
-    // 6. Protection checks
+    // 9. Protection checks
     for (const id of Object.keys(this.generators)) {
       this._checkProtection(this.generators[id], dt);
     }
 
-    // 7. Blackout detection and EMG auto-start
+    // 10. Blackout detection and EMG auto-start
     this._checkBlackout(dt);
   }
 
@@ -277,7 +359,7 @@ class PMSEngine {
       this._loadNoiseTimer = 0.5 + Math.random() * 1.5;
     }
     this._loadNoise = chase(this._loadNoise, this._loadNoiseTarget, 0.3, dt);
-    this.mainBus.totalLoad = Math.max(0, this.settings.baseLoad + this._loadNoise);
+    // Note: mainBus.totalLoad is now computed in _computeMainBus (base + noise + consumers)
   }
 
   // -----------------------------------------------------------------------
@@ -479,39 +561,140 @@ class PMSEngine {
   }
 
   // -----------------------------------------------------------------------
-  // AVR (Automatic Voltage Regulator)
+  // AVR (Automatic Voltage Regulator) with excitation dynamics
+  //   Load increase → voltage sag (proportional to load fraction, ~5% at full load)
+  //   AVR drives excitation to compensate → voltage recovers over ~0.5s
   // -----------------------------------------------------------------------
   _tickAVR(gen, dt) {
-    // When online (breaker closed), voltage is dominated by bus; when not on
-    // bus, voltage tracks the AVR setpoint.
+    const loadFrac = gen.capacity > 0 ? gen.activePower / gen.capacity : 0;
+    // Voltage sag from load: up to 5% at full load before AVR compensates
+    const voltageSag = gen.avrSetpoint * 0.05 * loadFrac;
+    // Target excitation level: AVR needs to increase excitation to counter sag
+    const targetExcitation = 1.0 + (voltageSag / gen.avrSetpoint);
+    // Excitation response is sluggish (models field winding time constant)
+    gen.excitationLevel = chase(gen.excitationLevel, targetExcitation, gen.excitationTau, dt);
+    // Effective voltage = setpoint * excitation - sag
+    const effectiveTarget = gen.avrSetpoint * gen.excitationLevel - voltageSag;
+
     if (gen.breakerState === BreakerState.CLOSED) {
-      // Voltage held close to AVR setpoint; reactive power absorbs mismatch
-      gen.voltage = chase(gen.voltage, gen.avrSetpoint, gen.avrTau, dt);
+      gen.voltage = chase(gen.voltage, effectiveTarget, gen.avrTau, dt);
       // Simplified reactive power model
-      const vError = gen.avrSetpoint - (this.mainBus.voltage || gen.avrSetpoint);
+      const busVoltage = this.mainBus.voltage || gen.avrSetpoint;
+      const vError = gen.avrSetpoint - busVoltage;
       gen.reactivePower = clamp(vError * 5, -gen.capacity * 0.5, gen.capacity * 0.5);
     } else {
-      gen.voltage = chase(gen.voltage, gen.avrSetpoint, gen.avrTau, dt);
+      gen.voltage = chase(gen.voltage, effectiveTarget, gen.avrTau, dt);
       gen.reactivePower = 0;
     }
   }
 
   // -----------------------------------------------------------------------
-  // Main busbar aggregate computation
+  // Heavy consumer load profiles
   // -----------------------------------------------------------------------
-  _computeMainBus(dt) {
-    const onlineGens = this._getOnlineMainGens();
+  _computeHeavyConsumers(dt) {
+    for (const [id, consumer] of Object.entries(this.heavyConsumers)) {
+      if (!consumer.enabled || consumer.breakerState !== BreakerState.CLOSED) {
+        consumer.currentLoad = chase(consumer.currentLoad, 0, 0.3, dt);
+        continue;
+      }
 
+      // Check if the bus feeding this consumer is live
+      const bus = this._resolveBus(consumer.bus);
+      if (!bus || !bus.live) {
+        consumer.currentLoad = chase(consumer.currentLoad, 0, 0.3, dt);
+        continue;
+      }
+
+      let targetLoad = 0;
+
+      switch (consumer.profile) {
+        case 'sinusoidal': {
+          // DP thruster: sinusoidal oscillation simulating dynamic positioning
+          if (!this._consumerPhase[id]) this._consumerPhase[id] = Math.random() * TWO_PI;
+          this._consumerPhase[id] += dt * 0.05 * TWO_PI; // ~20s period
+          const noise = (Math.random() - 0.5) * 0.05; // small noise
+          targetLoad = consumer.maxKw * (0.5 + 0.5 * Math.sin(this._consumerPhase[id]) + noise);
+          targetLoad = clamp(targetLoad, 0, consumer.maxKw);
+          break;
+        }
+        case 'step': {
+          // Crane: random steps between 20%-100% every 10-30s
+          if (!this._consumerStepTimer[id]) this._consumerStepTimer[id] = 0;
+          if (!this._consumerStepTarget[id]) this._consumerStepTarget[id] = consumer.maxKw * 0.3;
+          this._consumerStepTimer[id] -= dt;
+          if (this._consumerStepTimer[id] <= 0) {
+            this._consumerStepTarget[id] = consumer.maxKw * (0.2 + Math.random() * 0.8);
+            this._consumerStepTimer[id] = 10 + Math.random() * 20;
+          }
+          targetLoad = this._consumerStepTarget[id];
+          break;
+        }
+        case 'constant': {
+          // ROV: steady 70% load
+          targetLoad = consumer.maxKw * 0.7;
+          break;
+        }
+        default:
+          targetLoad = 0;
+      }
+
+      consumer.currentLoad = chase(consumer.currentLoad, targetLoad, 0.5, dt);
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Port/Starboard bus computation
+  // -----------------------------------------------------------------------
+  _computePortStbBuses(dt) {
+    // Compute port bus from its generators
+    const portGens = this._getOnlineGensForBus('portBus');
+    const stbGens = this._getOnlineGensForBus('stbBus');
+
+    this._computeBusFromGens(this.portBus, portGens, dt);
+    this._computeBusFromGens(this.stbBus, stbGens, dt);
+
+    // Consumer loads on each bus
+    let portConsumerLoad = 0;
+    let stbConsumerLoad = 0;
+    for (const c of Object.values(this.heavyConsumers)) {
+      if (c.bus === 'portBus') portConsumerLoad += c.currentLoad;
+      if (c.bus === 'stbBus') stbConsumerLoad += c.currentLoad;
+    }
+    // Sub-bus loads (transformed up to primary bus)
+    for (const t of Object.values(this.transformers)) {
+      if (t.breakerState === BreakerState.CLOSED) {
+        let subLoad = 0;
+        for (const c of Object.values(this.heavyConsumers)) {
+          if (c.bus === t.secondaryBus) subLoad += c.currentLoad;
+        }
+        if (t.primaryBus === 'portBus') portConsumerLoad += subLoad;
+        if (t.primaryBus === 'stbBus') stbConsumerLoad += subLoad;
+      }
+    }
+
+    this.portBus.totalLoad = portConsumerLoad;
+    this.stbBus.totalLoad = stbConsumerLoad;
+
+    // If bus-tie is closed, equalize frequency and voltage between port and stb
+    if (this.busTie.closed && this.portBus.live && this.stbBus.live) {
+      const avgFreq = (this.portBus.frequency + this.stbBus.frequency) / 2;
+      const avgVolt = (this.portBus.voltage + this.stbBus.voltage) / 2;
+      this.portBus.frequency = avgFreq;
+      this.stbBus.frequency = avgFreq;
+      this.portBus.voltage = avgVolt;
+      this.stbBus.voltage = avgVolt;
+    }
+  }
+
+  _computeBusFromGens(bus, onlineGens, dt) {
     if (onlineGens.length === 0) {
-      // No online generators: bus collapses
-      this.mainBus.voltage = chase(this.mainBus.voltage, 0, 0.3, dt);
-      this.mainBus.frequency = chase(this.mainBus.frequency, 0, 0.5, dt);
-      this.mainBus.totalGeneration = 0;
-      this.mainBus.live = this.mainBus.voltage > 50;
+      bus.voltage = chase(bus.voltage, 0, 0.3, dt);
+      bus.frequency = chase(bus.frequency, 0, 0.5, dt);
+      bus.totalGeneration = 0;
+      bus.live = bus.voltage > 50;
       return;
     }
 
-    // Weighted average frequency (weighted by capacity / inertia)
     let totalCap = 0;
     let weightedFreq = 0;
     let weightedVolt = 0;
@@ -524,10 +707,126 @@ class PMSEngine {
       totalPower += g.activePower;
     }
 
-    this.mainBus.frequency = weightedFreq / totalCap;
-    this.mainBus.voltage = weightedVolt / totalCap;
-    this.mainBus.totalGeneration = totalPower;
-    this.mainBus.live = this.mainBus.voltage > 50;
+    bus.frequency = weightedFreq / totalCap;
+    bus.voltage = weightedVolt / totalCap;
+    bus.totalGeneration = totalPower;
+    bus.live = bus.voltage > 50;
+    bus.phaseAngle = wrapAngle(bus.phaseAngle + TWO_PI * bus.frequency * dt);
+  }
+
+  _getOnlineGensForBus(busName) {
+    return Object.values(this.generators).filter(
+      (g) =>
+        g.assignedBus === busName &&
+        g.state === GenState.RUNNING &&
+        g.breakerState === BreakerState.CLOSED
+    );
+  }
+
+  // -----------------------------------------------------------------------
+  // Sub-bus computation (transformer secondaries)
+  // -----------------------------------------------------------------------
+  _computeSubBuses(dt) {
+    for (const [tId, transformer] of Object.entries(this.transformers)) {
+      const subBus = this.subBuses[transformer.secondaryBus];
+      if (!subBus) continue;
+
+      const primaryBus = this._resolveBus(transformer.primaryBus);
+      if (primaryBus && primaryBus.live && transformer.breakerState === BreakerState.CLOSED) {
+        subBus.voltage = primaryBus.voltage / transformer.ratio;
+        subBus.frequency = primaryBus.frequency;
+        subBus.live = true;
+      } else {
+        subBus.voltage = chase(subBus.voltage, 0, 0.3, dt);
+        subBus.frequency = chase(subBus.frequency, 0, 0.5, dt);
+        subBus.live = subBus.voltage > 10;
+      }
+    }
+  }
+
+  _resolveBus(busName) {
+    switch (busName) {
+      case 'portBus': return this.portBus;
+      case 'stbBus': return this.stbBus;
+      case 'emergencyBus': return this.emergencyBus;
+      case 'mainBus': return this.mainBus;
+      default:
+        if (this.subBuses[busName]) return this.subBuses[busName];
+        return null;
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Main busbar aggregate computation (port + stb combined, backward compat)
+  // -----------------------------------------------------------------------
+  _computeMainBus(dt) {
+    // Main bus is the aggregate of port + stb (backward compat)
+    // When bus-tie is closed, both sides are interconnected
+    const portLive = this.portBus.live;
+    const stbLive = this.stbBus.live;
+
+    if (this.busTie.closed) {
+      // Both sides connected - aggregate
+      if (portLive || stbLive) {
+        const portGen = this.portBus.totalGeneration || 0;
+        const stbGen = this.stbBus.totalGeneration || 0;
+        const totalGen = portGen + stbGen;
+
+        if (portLive && stbLive) {
+          this.mainBus.voltage = (this.portBus.voltage + this.stbBus.voltage) / 2;
+          this.mainBus.frequency = (this.portBus.frequency + this.stbBus.frequency) / 2;
+        } else if (portLive) {
+          this.mainBus.voltage = this.portBus.voltage;
+          this.mainBus.frequency = this.portBus.frequency;
+        } else {
+          this.mainBus.voltage = this.stbBus.voltage;
+          this.mainBus.frequency = this.stbBus.frequency;
+        }
+
+        this.mainBus.totalGeneration = totalGen;
+        this.mainBus.live = this.mainBus.voltage > 50;
+      } else {
+        this.mainBus.voltage = chase(this.mainBus.voltage, 0, 0.3, dt);
+        this.mainBus.frequency = chase(this.mainBus.frequency, 0, 0.5, dt);
+        this.mainBus.totalGeneration = 0;
+        this.mainBus.live = this.mainBus.voltage > 50;
+      }
+    } else {
+      // Bus-tie open: main bus = whichever side has more generation (for backward compat)
+      if (portLive && stbLive) {
+        const portGen = this.portBus.totalGeneration || 0;
+        const stbGen = this.stbBus.totalGeneration || 0;
+        // Use the stronger side as "main" for backward compat
+        if (portGen >= stbGen) {
+          this.mainBus.voltage = this.portBus.voltage;
+          this.mainBus.frequency = this.portBus.frequency;
+        } else {
+          this.mainBus.voltage = this.stbBus.voltage;
+          this.mainBus.frequency = this.stbBus.frequency;
+        }
+        this.mainBus.totalGeneration = portGen + stbGen;
+        this.mainBus.live = true;
+      } else if (portLive) {
+        this.mainBus.voltage = this.portBus.voltage;
+        this.mainBus.frequency = this.portBus.frequency;
+        this.mainBus.totalGeneration = this.portBus.totalGeneration;
+        this.mainBus.live = true;
+      } else if (stbLive) {
+        this.mainBus.voltage = this.stbBus.voltage;
+        this.mainBus.frequency = this.stbBus.frequency;
+        this.mainBus.totalGeneration = this.stbBus.totalGeneration;
+        this.mainBus.live = true;
+      } else {
+        this.mainBus.voltage = chase(this.mainBus.voltage, 0, 0.3, dt);
+        this.mainBus.frequency = chase(this.mainBus.frequency, 0, 0.5, dt);
+        this.mainBus.totalGeneration = 0;
+        this.mainBus.live = this.mainBus.voltage > 50;
+      }
+    }
+
+    // Total load includes base load + heavy consumers on main buses
+    let consumerLoad = this.portBus.totalLoad + this.stbBus.totalLoad;
+    this.mainBus.totalLoad = Math.max(0, this.settings.baseLoad + this._loadNoise + consumerLoad);
 
     // Bus phase angle tracks frequency
     this.mainBus.phaseAngle = wrapAngle(
@@ -766,7 +1065,8 @@ class PMSEngine {
   // -----------------------------------------------------------------------
 
   startGenerator(id) {
-    const gen = this.generators[id];
+    const resolvedId = id === 'SG' ? 'DG4' : id;
+    const gen = this.generators[resolvedId];
     if (!gen) return;
     if (gen.state !== GenState.OFF) return;
     if (gen.damaged) {
@@ -778,7 +1078,8 @@ class PMSEngine {
   }
 
   stopGenerator(id) {
-    const gen = this.generators[id];
+    const resolvedId = id === 'SG' ? 'DG4' : id;
+    const gen = this.generators[resolvedId];
     if (!gen) return;
     if (gen.state === GenState.OFF || gen.state === GenState.COOL_DOWN) return;
 
@@ -792,7 +1093,8 @@ class PMSEngine {
   }
 
   closeBreaker(id) {
-    const gen = this.generators[id];
+    const resolvedId = id === 'SG' ? 'DG4' : id;
+    const gen = this.generators[resolvedId];
     if (!gen) return;
 
     // Cannot close if tripped (must reset first)
@@ -838,7 +1140,8 @@ class PMSEngine {
   }
 
   openBreaker(id) {
-    const gen = this.generators[id];
+    const resolvedId = id === 'SG' ? 'DG4' : id;
+    const gen = this.generators[resolvedId];
     if (!gen) return;
     if (gen.breakerState === BreakerState.TRIPPED) {
       this._addAlert('warning', `${id} breaker is TRIPPED -- use reset instead`);
@@ -860,7 +1163,8 @@ class PMSEngine {
   }
 
   resetBreaker(id) {
-    const gen = this.generators[id];
+    const resolvedId = id === 'SG' ? 'DG4' : id;
+    const gen = this.generators[resolvedId];
     if (!gen) return;
     if (gen.breakerState !== BreakerState.TRIPPED) {
       this._addAlert('info', `${id} breaker is not tripped`);
@@ -873,19 +1177,19 @@ class PMSEngine {
   }
 
   setGovernorSetpoint(id, rpm) {
-    const gen = this.generators[id];
+    const gen = this.generators[id === 'SG' ? 'DG4' : id];
     if (!gen) return;
     gen.governorSetpoint = clamp(rpm, 0, this.nominalRpm * 1.15);
   }
 
   setAvrSetpoint(id, voltage) {
-    const gen = this.generators[id];
+    const gen = this.generators[id === 'SG' ? 'DG4' : id];
     if (!gen) return;
     gen.avrSetpoint = clamp(voltage, 0, this.settings.nominalVoltage * 1.2);
   }
 
   setSpeedMode(id, mode) {
-    const gen = this.generators[id];
+    const gen = this.generators[id === 'SG' ? 'DG4' : id];
     if (!gen) return;
     if (mode !== 'droop' && mode !== 'isochronous') return;
     gen.speedMode = mode;
@@ -894,13 +1198,13 @@ class PMSEngine {
   }
 
   setDroopPercent(id, percent) {
-    const gen = this.generators[id];
+    const gen = this.generators[id === 'SG' ? 'DG4' : id];
     if (!gen) return;
     gen.droopPercent = clamp(percent, 0, 8);
   }
 
   setIsoComms(id, enabled) {
-    const gen = this.generators[id];
+    const gen = this.generators[id === 'SG' ? 'DG4' : id];
     if (!gen) return;
     gen.isoCommsEnabled = !!enabled;
     gen.isoIntegral = 0;
@@ -939,17 +1243,60 @@ class PMSEngine {
       gen.damaged = false;
     }
 
-    // Reset bus
+    // Reset buses
     this.mainBus.voltage = 0;
     this.mainBus.frequency = 0;
     this.mainBus.phaseAngle = 0;
     this.mainBus.totalGeneration = 0;
     this.mainBus.live = false;
 
+    this.portBus.voltage = 0;
+    this.portBus.frequency = 0;
+    this.portBus.phaseAngle = 0;
+    this.portBus.totalLoad = 0;
+    this.portBus.totalGeneration = 0;
+    this.portBus.live = false;
+
+    this.stbBus.voltage = 0;
+    this.stbBus.frequency = 0;
+    this.stbBus.phaseAngle = 0;
+    this.stbBus.totalLoad = 0;
+    this.stbBus.totalGeneration = 0;
+    this.stbBus.live = false;
+
+    this.busTie.closed = true;
+
     this.emergencyBus.voltage = 0;
     this.emergencyBus.frequency = 0;
     this.emergencyBus.live = false;
     this.emergencyBus.busTieClosed = true;
+
+    // Reset transformers
+    for (const t of Object.values(this.transformers)) {
+      t.breakerState = BreakerState.OPEN;
+    }
+
+    // Reset sub-buses
+    for (const sb of Object.values(this.subBuses)) {
+      sb.voltage = 0;
+      sb.frequency = 0;
+      sb.live = false;
+    }
+
+    // Reset heavy consumers
+    for (const c of Object.values(this.heavyConsumers)) {
+      c.enabled = false;
+      c.breakerState = BreakerState.OPEN;
+      c.currentLoad = 0;
+    }
+
+    // Reset shore connection
+    this.shoreConnection.breakerState = BreakerState.OPEN;
+
+    // Reset consumer profile state
+    this._consumerPhase = {};
+    this._consumerStepTimer = {};
+    this._consumerStepTarget = {};
 
     // Reset tracking
     this.alerts = [];
@@ -977,7 +1324,9 @@ class PMSEngine {
    * @param {object} setup - State configuration
    */
   forceGeneratorState(id, setup) {
-    const gen = this.generators[id];
+    // Backward compat: 'SG' alias maps to 'DG4'
+    const resolvedId = id === 'SG' ? 'DG4' : id;
+    const gen = this.generators[resolvedId];
     if (!gen) return;
 
     const s = this.settings;
@@ -1073,7 +1422,7 @@ class PMSEngine {
    * Trip a generator's breaker (for scheduled events).
    */
   tripGenerator(id, reason) {
-    const gen = this.generators[id];
+    const gen = this.generators[id === 'SG' ? 'DG4' : id];
     if (!gen) return;
     if (gen.breakerState === BreakerState.CLOSED) {
       this._tripBreaker(gen, reason || 'overcurrent');
@@ -1131,12 +1480,96 @@ class PMSEngine {
     );
   }
 
+  // -----------------------------------------------------------------------
+  // Port-Stb bus-tie
+  // -----------------------------------------------------------------------
+  setMainBusTie(closed) {
+    this.busTie.closed = !!closed;
+    this._addAlert('info', `Main bus-tie ${closed ? 'CLOSED' : 'OPENED'}`);
+  }
+
+  // -----------------------------------------------------------------------
+  // Transformer breaker controls
+  // -----------------------------------------------------------------------
+  openTransformerBreaker(id) {
+    const t = this.transformers[id];
+    if (!t) return;
+    t.breakerState = BreakerState.OPEN;
+    this._addAlert('info', `${t.name} transformer breaker OPENED`);
+  }
+
+  closeTransformerBreaker(id) {
+    const t = this.transformers[id];
+    if (!t) return;
+    const primaryBus = this._resolveBus(t.primaryBus);
+    if (!primaryBus || !primaryBus.live) {
+      this._addAlert('warning', `Cannot close ${t.name} breaker: primary bus dead`);
+      return;
+    }
+    t.breakerState = BreakerState.CLOSED;
+    this._addAlert('info', `${t.name} transformer breaker CLOSED`);
+  }
+
+  // -----------------------------------------------------------------------
+  // Consumer controls
+  // -----------------------------------------------------------------------
+  enableConsumer(id) {
+    const c = this.heavyConsumers[id];
+    if (!c) return;
+    c.enabled = true;
+    this._addAlert('info', `${c.name} enabled`);
+  }
+
+  disableConsumer(id) {
+    const c = this.heavyConsumers[id];
+    if (!c) return;
+    c.enabled = false;
+    this._addAlert('info', `${c.name} disabled`);
+  }
+
+  openConsumerBreaker(id) {
+    const c = this.heavyConsumers[id];
+    if (!c) return;
+    c.breakerState = BreakerState.OPEN;
+    this._addAlert('info', `${c.name} breaker OPENED`);
+  }
+
+  closeConsumerBreaker(id) {
+    const c = this.heavyConsumers[id];
+    if (!c) return;
+    c.breakerState = BreakerState.CLOSED;
+    this._addAlert('info', `${c.name} breaker CLOSED`);
+  }
+
+  // -----------------------------------------------------------------------
+  // Shore connection
+  // -----------------------------------------------------------------------
+  connectShore() {
+    if (!this.shoreConnection.available) {
+      this._addAlert('warning', 'Shore connection not available');
+      return;
+    }
+    // Cannot connect shore if generators are online (must be dead bus)
+    const onlineGens = this._getOnlineMainGens();
+    if (onlineGens.length > 0) {
+      this._addAlert('warning', 'Cannot connect shore: generators online -- shut down first');
+      return;
+    }
+    this.shoreConnection.breakerState = BreakerState.CLOSED;
+    this._addAlert('info', 'Shore connection CLOSED -- bus energized from shore');
+  }
+
+  disconnectShore() {
+    this.shoreConnection.breakerState = BreakerState.OPEN;
+    this._addAlert('info', 'Shore connection OPENED');
+  }
+
   /**
    * Auto-synchronise helper: attempts to close the breaker at the optimal
    * moment. Returns true if successful, false if conditions are too far off.
    */
   autoSync(id) {
-    const gen = this.generators[id];
+    const gen = this.generators[id === 'SG' ? 'DG4' : id];
     if (!gen) return false;
     if (gen.state !== GenState.RUNNING) {
       this._addAlert('warning', `${id} is not running -- cannot auto-sync`);
@@ -1238,11 +1671,41 @@ class PMSEngine {
       }
     }
 
+    // Backward compat: alias DG4 as SG so tasks referencing 'SG' still work
+    if (genSnapshot.DG4) {
+      genSnapshot.SG = genSnapshot.DG4;
+    }
+
+    // Transformer snapshots
+    const transformerSnapshot = {};
+    for (const [id, t] of Object.entries(this.transformers)) {
+      transformerSnapshot[id] = { ...t };
+    }
+
+    // Sub-bus snapshots
+    const subBusSnapshot = {};
+    for (const [id, sb] of Object.entries(this.subBuses)) {
+      subBusSnapshot[id] = { ...sb };
+    }
+
+    // Heavy consumer snapshots
+    const consumerSnapshot = {};
+    for (const [id, c] of Object.entries(this.heavyConsumers)) {
+      consumerSnapshot[id] = { ...c };
+    }
+
     return {
       simTime: this.simTime,
       generators: genSnapshot,
       mainBus: { ...this.mainBus },
+      portBus: { ...this.portBus },
+      stbBus: { ...this.stbBus },
+      busTie: { ...this.busTie },
       emergencyBus: { ...this.emergencyBus },
+      transformers: transformerSnapshot,
+      subBuses: subBusSnapshot,
+      heavyConsumers: consumerSnapshot,
+      shoreConnection: { ...this.shoreConnection },
       synchroscopes,
       alerts: this.alerts.slice(-50),
       blackout: this.blackout,

@@ -420,6 +420,42 @@ export function GameProvider({ children }) {
     engineRef.current?.setBusTie(closed);
   }, []);
 
+  const setMainBusTie = useCallback((closed) => {
+    engineRef.current?.setMainBusTie(closed);
+  }, []);
+
+  const openTransformerBreaker = useCallback((id) => {
+    engineRef.current?.openTransformerBreaker(id);
+  }, []);
+
+  const closeTransformerBreaker = useCallback((id) => {
+    engineRef.current?.closeTransformerBreaker(id);
+  }, []);
+
+  const enableConsumer = useCallback((id) => {
+    engineRef.current?.enableConsumer(id);
+  }, []);
+
+  const disableConsumer = useCallback((id) => {
+    engineRef.current?.disableConsumer(id);
+  }, []);
+
+  const openConsumerBreaker = useCallback((id) => {
+    engineRef.current?.openConsumerBreaker(id);
+  }, []);
+
+  const closeConsumerBreaker = useCallback((id) => {
+    engineRef.current?.closeConsumerBreaker(id);
+  }, []);
+
+  const connectShore = useCallback(() => {
+    engineRef.current?.connectShore();
+  }, []);
+
+  const disconnectShore = useCallback(() => {
+    engineRef.current?.disconnectShore();
+  }, []);
+
   // -----------------------------------------------------------------------
   // Context value
   // -----------------------------------------------------------------------
@@ -467,6 +503,15 @@ export function GameProvider({ children }) {
     setIsoComms,
     autoSync,
     setBusTie,
+    setMainBusTie,
+    openTransformerBreaker,
+    closeTransformerBreaker,
+    enableConsumer,
+    disableConsumer,
+    openConsumerBreaker,
+    closeConsumerBreaker,
+    connectShore,
+    disconnectShore,
   };
 
   return (

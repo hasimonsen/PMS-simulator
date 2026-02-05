@@ -1,18 +1,12 @@
 import React, { useState } from 'react';
 import { useGame } from '../context/GameContext';
-import { useLang } from '../context/LangContext';
 import Generator from './Generator';
 import Busbar from './Busbar';
-import Synchroscope from './Synchroscope';
-import BreakerPanel from './BreakerPanel';
-import GovernorPanel from './GovernorPanel';
-import AVRPanel from './AVRPanel';
 
-const MAIN_GENERATORS = ['DG1', 'DG2', 'DG3', 'SG'];
+const MAIN_GENERATORS = ['DG1', 'DG2', 'DG3', 'DG4'];
 
 export default function PMSSimulator() {
   const { engineState } = useGame();
-  const { t } = useLang();
   const [selectedGen, setSelectedGen] = useState('DG1');
 
   return (
@@ -29,27 +23,12 @@ export default function PMSSimulator() {
         ))}
       </div>
 
-      {/* Middle row: Unified busbar diagram (includes emergency) */}
+      {/* Main area: Busbar diagram with all controls in popups */}
       <div className="pms-simulator__middle">
         <Busbar
           selectedGen={selectedGen}
           onSelectGen={setSelectedGen}
         />
-      </div>
-
-      {/* Bottom row: Active generator control panels */}
-      <div className="pms-simulator__controls">
-        <div className="pms-simulator__controls-header">
-          <span className="pms-simulator__controls-label">
-            {t('governor')} / {t('avr')} / {t('synchroscope')} — {selectedGen}
-          </span>
-        </div>
-        <div className="pms-simulator__controls-panels">
-          <GovernorPanel genId={selectedGen} />
-          <AVRPanel genId={selectedGen} />
-          <Synchroscope genId={selectedGen} />
-          <BreakerPanel genId={selectedGen} />
-        </div>
       </div>
     </div>
   );

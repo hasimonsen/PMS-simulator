@@ -1522,6 +1522,73 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
   background: var(--color-blue-bg);
 }
 
+/* ── New popup elements for expanded Busbar ─────────────────────── */
+
+.busbar-popup__section-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #4fc3f7;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 8px 0 4px 0;
+  border-top: 1px solid rgba(79, 195, 247, 0.15);
+  margin-top: 6px;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.busbar-popup__btn-sm {
+  padding: 3px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 4px;
+  border: 1px solid #3a4a5e;
+  background: transparent;
+  color: #7a8a9e;
+  cursor: pointer;
+  font-family: monospace;
+  transition: all 0.15s;
+}
+
+.busbar-popup__btn-sm:hover {
+  border-color: #4fc3f7;
+  color: #4fc3f7;
+}
+
+.busbar-popup__btn-sm--active {
+  border-color: #00ff88;
+  color: #00ff88;
+  background: rgba(0, 255, 136, 0.1);
+}
+
+.busbar-popup__cam-btn {
+  width: 28px;
+  height: 24px;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: 4px;
+  border: 1px solid #3a4a5e;
+  background: rgba(30, 40, 55, 0.8);
+  color: #c8d6e5;
+  cursor: pointer;
+  font-family: monospace;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.busbar-popup__cam-btn:hover {
+  border-color: #4fc3f7;
+  color: #4fc3f7;
+  background: rgba(79, 195, 247, 0.1);
+}
+
+.busbar-popup__cam-btn:active {
+  background: rgba(79, 195, 247, 0.25);
+  transform: scale(0.95);
+}
+
 /* ==========================================================================
    EMERGENCY BUS
    ========================================================================== */
