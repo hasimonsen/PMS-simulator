@@ -4,7 +4,7 @@ import { useGame } from '../context/GameContext';
 /* ── Layout constants ─────────────────────────────────────────────── */
 const PORT_GENS = ['DG1', 'DG2'];
 const STB_GENS = ['DG3', 'DG4'];
-const GEN_X = { DG1: 250, DG2: 480, DG3: 900, DG4: 1130, EMG: 1450 };
+const GEN_X = { DG1: 280, DG2: 470, DG3: 920, DG4: 1110, EMG: 1450 };
 
 const ENGINE_Y = 35;
 const ENGINE_W = 58;
@@ -21,17 +21,39 @@ const MAIN_TIE_X = 700;
 const EMG_TIE_X = 1340;
 const EMG_BUS_S = 1380, EMG_BUS_E = 1530;
 
-// Below-bus
-const THR_ST_X = 180, THR_MT_X = 350;
-const THR_BT_X = 830, THR_AZ_X = 1010;
-const T1_X = 530, T2_X = 1180;
-const TRAFO_Y = 310;
-const SUB_BUS_Y = 390;
-const PORT_450_S = 460, PORT_450_E = 600;
-const STB_450_S = 1110, STB_450_E = 1250;
-const CRANE1_X = 490, ROV1_X = 570;
-const CRANE2_X = 1140, ROV2_X = 1220;
+// Thrusters on 690V
+const THR_ST_X = 190, THR_MT_X = 370;
+const THR_BT_X = 850, THR_AZ_X = 1040;
 
+// T1/T2 transformers (690V → 450V)
+const T1_X = 550, T2_X = 1200;
+const TRAFO_Y = 310;
+
+// 450V buses
+const SUB_450_Y = 390;
+const PORT_450_S = 470, PORT_450_E = 630;
+const STB_450_S = 1120, STB_450_E = 1280;
+const TIE_450_X = 875;
+
+// Consumers on 450V
+const CRANE1_X = 500, ROV1_X = 600;
+const CRANE2_X = 1150, ROV2_X = 1250;
+
+// Shore on Stb 450V
+const SHORE_X = 1200;
+const SHORE_Y = 475;
+
+// T5/T6 transformers (690V → 230V)
+const T5_X = 230, T6_X = 1060;
+const TRAFO_230_Y = 480;
+
+// 230V port/stb buses
+const BUS_230_Y = 555;
+const PORT_230_S = 160, PORT_230_E = 320;
+const STB_230_S = 990, STB_230_E = 1140;
+const TIE_230_X = 655;
+
+// EMG section
 const T3_X = 1420;
 const EMG_230_BUS_Y = 390;
 const EMG_230_S = 1380, EMG_230_E = 1530;
@@ -39,10 +61,8 @@ const T4_X = 1490;
 const T4_TRAFO_Y = 450;
 const DC_110_BUS_Y = 520;
 
-const SHORE_X = 700;
-const SHORE_Y = 500;
 const SVG_W = 1600;
-const SVG_H = 600;
+const SVG_H = 700;
 
 /* ── Colors ───────────────────────────────────────────────────────── */
 const C = {
@@ -56,12 +76,15 @@ const RPM_MIN = 680, RPM_MAX = 760, RPM_STEP = 0.5, TICK_MS = 50;
 const V_MIN = 620, V_MAX = 760;
 const SYNC_N = 24, SYNC_R = 38;
 
+let _popupId = 0;
+
 export default function WBDView() {
   const ctx = useGame();
   const containerRef = useRef(null);
-  const [popup, setPopup] = useState(null);
+  const [popups, setPopups] = useState([]);
   const intervalRef = useRef(null);
   const dirRef = useRef(0);
+  const dragRef = useRef(null);
 
   const stopAdj = useCallback(() => {
     dirRef.current = 0;
@@ -76,6 +99,8 @@ export default function WBDView() {
   const mainBus = es.mainBus || {};
   const emBus = es.emergencyBus || {};
   const busTie = es.busTie || {};
+  const busTie450 = es.busTie450 || {};
+  const busTie230 = es.busTie230 || {};
   const xformers = es.transformers || {};
   const subBuses = es.subBuses || {};
   const consumers = es.heavyConsumers || {};
@@ -88,18 +113,55 @@ export default function WBDView() {
   const emLive = emBus.live;
   const mainTieClosed = busTie.closed ?? true;
   const emTieClosed = emBus.busTieClosed ?? false;
+  const tie450Closed = busTie450.closed ?? false;
+  const tie230Closed = busTie230.closed ?? false;
   const portCol = portLive ? C.green : C.gray;
   const stbCol = stbLive ? C.green : C.gray;
   const emCol = emLive ? C.amber : C.gray;
 
-  /* ── Popup helpers ──────────────────────────────────────────────── */
+  const sb450p = subBuses.port450Bus || {};
+  const sb450s = subBuses.stb450Bus || {};
+  const sb230p = subBuses.port230Bus || {};
+  const sb230s = subBuses.stb230Bus || {};
+  const sb230e = subBuses.emg230Bus || {};
+  const sb110 = subBuses.dc110Bus || {};
+
+  /* ── Popup helpers (multi-popup, movable) ─────────────────────── */
   const openPopup = useCallback((e, type, id) => {
     e.stopPropagation();
     const r = containerRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
-    setPopup({ type, id, x: e.clientX - r.left, y: e.clientY - r.top });
+    const x = e.clientX - r.left;
+    const y = e.clientY - r.top;
+    setPopups(prev => {
+      const existing = prev.find(p => p.type === type && p.id === id);
+      if (existing) return [...prev.filter(p => p !== existing), existing];
+      return [...prev, { key: ++_popupId, type, id, x: x + 10, y: y + 10 }];
+    });
   }, []);
 
-  const closePopup = useCallback(() => { stopAdj(); setPopup(null); }, [stopAdj]);
+  const closeOnePopup = useCallback((key) => {
+    stopAdj();
+    setPopups(prev => prev.filter(p => p.key !== key));
+  }, [stopAdj]);
+
+  const onDragStart = useCallback((e, key) => {
+    e.preventDefault();
+    const r = containerRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
+    const p = popups.find(p => p.key === key);
+    if (!p) return;
+    dragRef.current = { key, offsetX: e.clientX - r.left - p.x, offsetY: e.clientY - r.top - p.y };
+  }, [popups]);
+
+  const onDragMove = useCallback((e) => {
+    if (!dragRef.current) return;
+    const r = containerRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
+    const { key, offsetX, offsetY } = dragRef.current;
+    const nx = e.clientX - r.left - offsetX;
+    const ny = e.clientY - r.top - offsetY;
+    setPopups(prev => prev.map(p => p.key === key ? { ...p, x: nx, y: ny } : p));
+  }, []);
+
+  const onDragEnd = useCallback(() => { dragRef.current = null; }, []);
 
   function sColor(s) {
     if (s === 'RUNNING') return C.green;
@@ -197,7 +259,6 @@ export default function WBDView() {
         <text x={tx + 5} y={ty + 47} fill={C.grayLt} fontSize="10" fontFamily="monospace">
           Load: {Math.round(g.loadPercent || 0)}%
         </text>
-        {/* Fault dots */}
         <circle cx={tx + w - 32} cy={ty + 53} r={3.5} fill={g.damaged ? C.red : C.gray} />
         <circle cx={tx + w - 19} cy={ty + 53} r={3.5} fill={g.breakerTripped ? C.red : C.gray} />
         <circle cx={tx + w - 6} cy={ty + 53} r={3.5} fill={g.state === 'RUNNING' ? C.green : C.gray} />
@@ -253,14 +314,14 @@ export default function WBDView() {
     const col = conn ? C.greenDim : C.gray;
     return (
       <g style={{ cursor: 'pointer' }} onClick={(e) => openPopup(e, 'shore', 'SHORE')}>
-        <line x1={SHORE_X} y1={BUS_Y} x2={SHORE_X} y2={SHORE_Y - 30} stroke={col} strokeWidth={1.5} />
+        <line x1={SHORE_X} y1={SUB_450_Y} x2={SHORE_X} y2={SHORE_Y - 30} stroke={col} strokeWidth={1.5} />
         {Brk(SHORE_X, SHORE_Y - 30, shore.breakerState || 'OPEN', (e) => openPopup(e, 'shore', 'SHORE'))}
         <rect x={SHORE_X - 40} y={SHORE_Y} width={80} height={32} rx={4}
           fill={conn ? 'rgba(0,255,136,0.1)' : 'rgba(60,70,85,0.3)'} stroke={col} strokeWidth={1.5} />
         <text x={SHORE_X} y={SHORE_Y + 11} textAnchor="middle" dominantBaseline="middle"
           fill={col} fontSize="11" fontFamily="monospace" fontWeight="bold">SHORE</text>
         <text x={SHORE_X} y={SHORE_Y + 24} textAnchor="middle" dominantBaseline="middle"
-          fill={C.grayLt} fontSize="8" fontFamily="monospace">690V 60Hz</text>
+          fill={C.grayLt} fontSize="8" fontFamily="monospace">450V 60Hz</text>
       </g>
     );
   }
@@ -320,42 +381,53 @@ export default function WBDView() {
     );
   }
 
-  /* ── Popup ──────────────────────────────────────────────────────── */
-  function renderPopup() {
-    if (!popup) return null;
-    const { type, id, x, y } = popup;
-    const pw = type === 'gen' ? 370 : 270;
+  /* ── Popup (multi, movable) ────────────────────────────────────── */
+  function popupTitle(type, id) {
+    if (type === 'gen') return `Generator — ${id}`;
+    if (type === 'xformer') return `Transformer — ${xformers[id]?.name || id}`;
+    if (type === 'consumer') return consumers[id]?.name || id;
+    if (type === 'maintie') return 'Main Bus-Tie';
+    if (type === 'emgtie') return 'EMG Bus-Tie';
+    if (type === 'tie450') return '450V Bus-Tie';
+    if (type === 'tie230') return '230V Bus-Tie';
+    if (type === 'shore') return 'Shore Connection';
+    return id;
+  }
+
+  function popupBody(type, id) {
+    if (type === 'gen') return GenPopup(id);
+    if (type === 'xformer') return XformerPopup(id);
+    if (type === 'consumer') return ConsumerPopup(id);
+    if (type === 'maintie') return TiePopup(mainTieClosed, ctx.setMainBusTie);
+    if (type === 'emgtie') return TiePopup(emTieClosed, ctx.setBusTie);
+    if (type === 'tie450') return TiePopup(tie450Closed, ctx.setTie450);
+    if (type === 'tie230') return TiePopup(tie230Closed, ctx.setTie230);
+    if (type === 'shore') return ShorePopup();
+    return null;
+  }
+
+  function renderPopups() {
+    if (popups.length === 0) return null;
     const cw = containerRef.current?.offsetWidth || 1000;
     const ch = containerRef.current?.offsetHeight || 600;
-    let px = Math.min(x + 10, cw - pw - 10);
-    let py = Math.min(y + 10, ch - 200);
-    if (px < 10) px = 10;
-    if (py < 10) py = 10;
-
-    return (
-      <div className="busbar-popup" style={{ left: px, top: py, width: pw, maxHeight: ch - 40, overflowY: 'auto' }}
-        onClick={(e) => e.stopPropagation()}>
-        <div className="busbar-popup__header">
-          <span className="busbar-popup__title">
-            {type === 'gen' && `Generator — ${id}`}
-            {type === 'xformer' && `Transformer — ${xformers[id]?.name || id}`}
-            {type === 'consumer' && `${consumers[id]?.name || id}`}
-            {type === 'maintie' && 'Main Bus-Tie'}
-            {type === 'emgtie' && 'EMG Bus-Tie'}
-            {type === 'shore' && 'Shore Connection'}
-          </span>
-          <button className="busbar-popup__close" onClick={closePopup}>×</button>
+    return popups.map((p) => {
+      const pw = p.type === 'gen' ? 370 : 270;
+      const px = Math.max(0, Math.min(p.x, cw - pw - 10));
+      const py = Math.max(0, Math.min(p.y, ch - 200));
+      return (
+        <div key={p.key} className="busbar-popup" style={{ left: px, top: py, width: pw, maxHeight: ch - 40, overflowY: 'auto', zIndex: 100 + p.key }}
+          onClick={(e) => e.stopPropagation()}>
+          <div className="busbar-popup__header busbar-popup__drag-handle"
+            onMouseDown={(e) => onDragStart(e, p.key)}>
+            <span className="busbar-popup__title">{popupTitle(p.type, p.id)}</span>
+            <button className="busbar-popup__close" onClick={() => closeOnePopup(p.key)}>×</button>
+          </div>
+          <div className="busbar-popup__body">
+            {popupBody(p.type, p.id)}
+          </div>
         </div>
-        <div className="busbar-popup__body">
-          {type === 'gen' && GenPopup(id)}
-          {type === 'xformer' && XformerPopup(id)}
-          {type === 'consumer' && ConsumerPopup(id)}
-          {type === 'maintie' && TiePopup(mainTieClosed, ctx.setMainBusTie)}
-          {type === 'emgtie' && TiePopup(emTieClosed, ctx.setBusTie)}
-          {type === 'shore' && ShorePopup()}
-        </div>
-      </div>
-    );
+      );
+    });
   }
 
   function GenPopup(id) {
@@ -428,12 +500,10 @@ export default function WBDView() {
     const tf = xformers[tId];
     if (!tf) return null;
     return (
-      <>
-        <div className="busbar-popup__actions">
-          <Btn c="start" onClick={() => ctx.closeTransformerBreaker(tId)} disabled={tf.breakerState === 'CLOSED'}>CLOSE</Btn>
-          <Btn c="stop" onClick={() => ctx.openTransformerBreaker(tId)} disabled={tf.breakerState === 'OPEN'}>OPEN</Btn>
-        </div>
-      </>
+      <div className="busbar-popup__actions">
+        <Btn c="start" onClick={() => ctx.closeTransformerBreaker(tId)} disabled={tf.breakerState === 'CLOSED'}>CLOSE</Btn>
+        <Btn c="stop" onClick={() => ctx.openTransformerBreaker(tId)} disabled={tf.breakerState === 'OPEN'}>OPEN</Btn>
+      </div>
     );
   }
 
@@ -441,36 +511,30 @@ export default function WBDView() {
     const c = consumers[cId];
     if (!c) return null;
     return (
-      <>
-        <div className="busbar-popup__actions">
-          <Btn c="start" onClick={() => { ctx.enableConsumer(cId); ctx.closeConsumerBreaker(cId); }}
-            disabled={c.enabled && c.breakerState === 'CLOSED'}>ENABLE</Btn>
-          <Btn c="stop" onClick={() => { ctx.disableConsumer(cId); ctx.openConsumerBreaker(cId); }}
-            disabled={!c.enabled}>DISABLE</Btn>
-        </div>
-      </>
+      <div className="busbar-popup__actions">
+        <Btn c="start" onClick={() => { ctx.enableConsumer(cId); ctx.closeConsumerBreaker(cId); }}
+          disabled={c.enabled && c.breakerState === 'CLOSED'}>ENABLE</Btn>
+        <Btn c="stop" onClick={() => { ctx.disableConsumer(cId); ctx.openConsumerBreaker(cId); }}
+          disabled={!c.enabled}>DISABLE</Btn>
+      </div>
     );
   }
 
   function TiePopup(closed, setFn) {
     return (
-      <>
-        <div className="busbar-popup__actions">
-          <Btn c="start" onClick={() => setFn(true)} disabled={closed}>CLOSE</Btn>
-          <Btn c="stop" onClick={() => setFn(false)} disabled={!closed}>OPEN</Btn>
-        </div>
-      </>
+      <div className="busbar-popup__actions">
+        <Btn c="start" onClick={() => setFn(true)} disabled={closed}>CLOSE</Btn>
+        <Btn c="stop" onClick={() => setFn(false)} disabled={!closed}>OPEN</Btn>
+      </div>
     );
   }
 
   function ShorePopup() {
     return (
-      <>
-        <div className="busbar-popup__actions">
-          <Btn c="start" onClick={() => ctx.connectShore()} disabled={shore.breakerState === 'CLOSED'}>CONNECT</Btn>
-          <Btn c="stop" onClick={() => ctx.disconnectShore()} disabled={shore.breakerState !== 'CLOSED'}>DISCONNECT</Btn>
-        </div>
-      </>
+      <div className="busbar-popup__actions">
+        <Btn c="start" onClick={() => ctx.connectShore()} disabled={shore.breakerState === 'CLOSED'}>CONNECT</Btn>
+        <Btn c="stop" onClick={() => ctx.disconnectShore()} disabled={shore.breakerState !== 'CLOSED'}>DISCONNECT</Btn>
+      </div>
     );
   }
 
@@ -490,14 +554,9 @@ export default function WBDView() {
     return <button className={`busbar-popup__btn busbar-popup__btn--${c}`} onClick={onClick} disabled={disabled}>{children}</button>;
   }
 
-  const sb450p = subBuses.port450Bus || {};
-  const sb450s = subBuses.stb450Bus || {};
-  const sb230 = subBuses.emg230Bus || {};
-  const sb110 = subBuses.dc110Bus || {};
-
   /* ── Main SVG ───────────────────────────────────────────────────── */
   return (
-    <div className="wbd-view" ref={containerRef} onClick={closePopup}>
+    <div className="wbd-view" ref={containerRef} onMouseMove={onDragMove} onMouseUp={onDragEnd} onMouseLeave={onDragEnd}>
       <svg className="wbd-view__diagram" viewBox={`0 0 ${SVG_W} ${SVG_H}`}
         preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
 
@@ -569,44 +628,74 @@ export default function WBDView() {
 
         {/* ── T1 Port → 450V ──── */}
         {Trafo(T1_X, TRAFO_Y, 'T1', BUS_Y, portCol, sb450p.live ? C.blue : C.gray)}
-        <line x1={T1_X} y1={TRAFO_Y + 16} x2={T1_X} y2={SUB_BUS_Y} stroke={sb450p.live ? C.blue : C.gray} strokeWidth={1.5} />
-        <line x1={PORT_450_S} y1={SUB_BUS_Y} x2={PORT_450_E} y2={SUB_BUS_Y} stroke={sb450p.live ? C.blue : C.gray} strokeWidth={4} strokeLinecap="round" />
-        <text x={(PORT_450_S + PORT_450_E) / 2} y={SUB_BUS_Y - 9} textAnchor="middle"
+        <line x1={T1_X} y1={TRAFO_Y + 16} x2={T1_X} y2={SUB_450_Y} stroke={sb450p.live ? C.blue : C.gray} strokeWidth={1.5} />
+        <line x1={PORT_450_S} y1={SUB_450_Y} x2={PORT_450_E} y2={SUB_450_Y} stroke={sb450p.live ? C.blue : C.gray} strokeWidth={4} strokeLinecap="round" />
+        <text x={(PORT_450_S + PORT_450_E) / 2} y={SUB_450_Y - 9} textAnchor="middle"
           fill={sb450p.live ? C.blue : C.grayLt} fontSize="8" fontFamily="monospace">450V PORT</text>
-        {Consumer(CRANE1_X, SUB_BUS_Y, 'crane1', 'port450Bus')}
-        {Consumer(ROV1_X, SUB_BUS_Y, 'rov1', 'port450Bus')}
+        {Consumer(CRANE1_X, SUB_450_Y, 'crane1', 'port450Bus')}
+        {Consumer(ROV1_X, SUB_450_Y, 'rov1', 'port450Bus')}
 
         {/* ── T2 Stb → 450V ──── */}
         {Trafo(T2_X, TRAFO_Y, 'T2', BUS_Y, stbCol, sb450s.live ? C.blue : C.gray)}
-        <line x1={T2_X} y1={TRAFO_Y + 16} x2={T2_X} y2={SUB_BUS_Y} stroke={sb450s.live ? C.blue : C.gray} strokeWidth={1.5} />
-        <line x1={STB_450_S} y1={SUB_BUS_Y} x2={STB_450_E} y2={SUB_BUS_Y} stroke={sb450s.live ? C.blue : C.gray} strokeWidth={4} strokeLinecap="round" />
-        <text x={(STB_450_S + STB_450_E) / 2} y={SUB_BUS_Y - 9} textAnchor="middle"
+        <line x1={T2_X} y1={TRAFO_Y + 16} x2={T2_X} y2={SUB_450_Y} stroke={sb450s.live ? C.blue : C.gray} strokeWidth={1.5} />
+        <line x1={STB_450_S} y1={SUB_450_Y} x2={STB_450_E} y2={SUB_450_Y} stroke={sb450s.live ? C.blue : C.gray} strokeWidth={4} strokeLinecap="round" />
+        <text x={(STB_450_S + STB_450_E) / 2} y={SUB_450_Y - 9} textAnchor="middle"
           fill={sb450s.live ? C.blue : C.grayLt} fontSize="8" fontFamily="monospace">450V STB</text>
-        {Consumer(CRANE2_X, SUB_BUS_Y, 'crane2', 'stb450Bus')}
-        {Consumer(ROV2_X, SUB_BUS_Y, 'rov2', 'stb450Bus')}
+        {Consumer(CRANE2_X, SUB_450_Y, 'crane2', 'stb450Bus')}
+        {Consumer(ROV2_X, SUB_450_Y, 'rov2', 'stb450Bus')}
+
+        {/* ── 450V Bus-Tie ──── */}
+        <line x1={PORT_450_E} y1={SUB_450_Y} x2={TIE_450_X - 16} y2={SUB_450_Y}
+          stroke={sb450p.live ? C.blue : C.gray} strokeWidth={2} />
+        {Brk(TIE_450_X, SUB_450_Y, tie450Closed ? 'CLOSED' : 'OPEN', (e) => openPopup(e, 'tie450', 'TIE450'), true)}
+        <text x={TIE_450_X} y={SUB_450_Y - 14} textAnchor="middle" fill={C.grayLt} fontSize="8" fontFamily="monospace">450V TIE</text>
+        <line x1={TIE_450_X + 16} y1={SUB_450_Y} x2={STB_450_S} y2={SUB_450_Y}
+          stroke={sb450s.live ? C.blue : C.gray} strokeWidth={2} />
+
+        {/* ── Shore on Stb 450V ──── */}
+        {Shore()}
+
+        {/* ── T5 Port 690V → 230V ──── */}
+        {Trafo(T5_X, TRAFO_230_Y, 'T5', BUS_Y, portCol, sb230p.live ? C.blue : C.gray)}
+        <line x1={T5_X} y1={TRAFO_230_Y + 16} x2={T5_X} y2={BUS_230_Y} stroke={sb230p.live ? C.blue : C.gray} strokeWidth={1.5} />
+        <line x1={PORT_230_S} y1={BUS_230_Y} x2={PORT_230_E} y2={BUS_230_Y} stroke={sb230p.live ? C.blue : C.gray} strokeWidth={4} strokeLinecap="round" />
+        <text x={(PORT_230_S + PORT_230_E) / 2} y={BUS_230_Y - 9} textAnchor="middle"
+          fill={sb230p.live ? C.blue : C.grayLt} fontSize="8" fontFamily="monospace">230V PORT</text>
+
+        {/* ── T6 Stb 690V → 230V ──── */}
+        {Trafo(T6_X, TRAFO_230_Y, 'T6', BUS_Y, stbCol, sb230s.live ? C.blue : C.gray)}
+        <line x1={T6_X} y1={TRAFO_230_Y + 16} x2={T6_X} y2={BUS_230_Y} stroke={sb230s.live ? C.blue : C.gray} strokeWidth={1.5} />
+        <line x1={STB_230_S} y1={BUS_230_Y} x2={STB_230_E} y2={BUS_230_Y} stroke={sb230s.live ? C.blue : C.gray} strokeWidth={4} strokeLinecap="round" />
+        <text x={(STB_230_S + STB_230_E) / 2} y={BUS_230_Y - 9} textAnchor="middle"
+          fill={sb230s.live ? C.blue : C.grayLt} fontSize="8" fontFamily="monospace">230V STB</text>
+
+        {/* ── 230V Bus-Tie ──── */}
+        <line x1={PORT_230_E} y1={BUS_230_Y} x2={TIE_230_X - 16} y2={BUS_230_Y}
+          stroke={sb230p.live ? C.blue : C.gray} strokeWidth={2} />
+        {Brk(TIE_230_X, BUS_230_Y, tie230Closed ? 'CLOSED' : 'OPEN', (e) => openPopup(e, 'tie230', 'TIE230'), true)}
+        <text x={TIE_230_X} y={BUS_230_Y - 14} textAnchor="middle" fill={C.grayLt} fontSize="8" fontFamily="monospace">230V TIE</text>
+        <line x1={TIE_230_X + 16} y1={BUS_230_Y} x2={STB_230_S} y2={BUS_230_Y}
+          stroke={sb230s.live ? C.blue : C.gray} strokeWidth={2} />
 
         {/* ── T3 EMG → 230V ──── */}
-        {Trafo(T3_X, TRAFO_Y, 'T3', BUS_Y, emCol, sb230.live ? C.blue : C.gray)}
-        <line x1={T3_X} y1={TRAFO_Y + 16} x2={T3_X} y2={EMG_230_BUS_Y} stroke={sb230.live ? C.blue : C.gray} strokeWidth={1.5} />
-        <line x1={EMG_230_S} y1={EMG_230_BUS_Y} x2={EMG_230_E} y2={EMG_230_BUS_Y} stroke={sb230.live ? C.blue : C.gray} strokeWidth={4} strokeLinecap="round" />
+        {Trafo(T3_X, TRAFO_Y, 'T3', BUS_Y, emCol, sb230e.live ? C.blue : C.gray)}
+        <line x1={T3_X} y1={TRAFO_Y + 16} x2={T3_X} y2={EMG_230_BUS_Y} stroke={sb230e.live ? C.blue : C.gray} strokeWidth={1.5} />
+        <line x1={EMG_230_S} y1={EMG_230_BUS_Y} x2={EMG_230_E} y2={EMG_230_BUS_Y} stroke={sb230e.live ? C.blue : C.gray} strokeWidth={4} strokeLinecap="round" />
         <text x={(EMG_230_S + EMG_230_E) / 2} y={EMG_230_BUS_Y - 9} textAnchor="middle"
-          fill={sb230.live ? C.blue : C.grayLt} fontSize="8" fontFamily="monospace">230V EMG</text>
+          fill={sb230e.live ? C.blue : C.grayLt} fontSize="8" fontFamily="monospace">230V EMG</text>
 
         {/* ── T4 230V → 110V ──── */}
-        {Trafo(T4_X, T4_TRAFO_Y, 'T4', EMG_230_BUS_Y, sb230.live ? C.blue : C.gray, sb110.live ? C.gold : C.gray)}
+        {Trafo(T4_X, T4_TRAFO_Y, 'T4', EMG_230_BUS_Y, sb230e.live ? C.blue : C.gray, sb110.live ? C.gold : C.gray)}
         <line x1={T4_X} y1={T4_TRAFO_Y + 16} x2={T4_X} y2={DC_110_BUS_Y} stroke={sb110.live ? C.gold : C.gray} strokeWidth={1.5} />
         <line x1={T4_X - 50} y1={DC_110_BUS_Y} x2={T4_X + 50} y2={DC_110_BUS_Y} stroke={sb110.live ? C.gold : C.gray} strokeWidth={4} strokeLinecap="round" />
         <text x={T4_X} y={DC_110_BUS_Y - 9} textAnchor="middle"
           fill={sb110.live ? C.gold : C.grayLt} fontSize="8" fontFamily="monospace">110V DC</text>
 
-        {/* ── Shore connection ──── */}
-        {Shore()}
-
         {/* ── Power summary ──── */}
         {PowerSummary()}
       </svg>
 
-      {popup && renderPopup()}
+      {renderPopups()}
     </div>
   );
 }

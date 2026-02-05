@@ -52,8 +52,8 @@ const T4_X = 1300;
 const T4_TRAFO_Y = 375;
 const DC_110_BUS_Y = 425;
 
-const SHORE_X = 590;
-const SHORE_Y = 440;
+const SHORE_X = 1100;
+const SHORE_Y = 400;
 const SVG_W = 1400;
 const SVG_H = 490;
 
@@ -69,13 +69,16 @@ const RPM_MIN = 680, RPM_MAX = 760, RPM_STEP = 0.5, TICK_MS = 50;
 const V_MIN = 620, V_MAX = 760;
 const SYNC_N = 24, SYNC_R = 38;
 
-export default function Busbar({ selectedGen, onSelectGen }) {
+let _popupId = 0;
+
+export default function Busbar() {
   const ctx = useGame();
   const { t } = useLang();
   const containerRef = useRef(null);
-  const [popup, setPopup] = useState(null);
+  const [popups, setPopups] = useState([]);
   const intervalRef = useRef(null);
   const dirRef = useRef(0);
+  const dragRef = useRef(null); // { key, offsetX, offsetY }
 
   const stopAdj = useCallback(() => {
     dirRef.current = 0;
@@ -106,15 +109,45 @@ export default function Busbar({ selectedGen, onSelectGen }) {
   const stbCol = stbLive ? C.green : C.gray;
   const emCol = emLive ? C.amber : C.gray;
 
-  /* ── Popup helpers ──────────────────────────────────────────────── */
+  /* ── Popup helpers (multi-popup, movable) ─────────────────────── */
   const openPopup = useCallback((e, type, id) => {
     e.stopPropagation();
-    if (onSelectGen) onSelectGen(id);
     const r = containerRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
-    setPopup({ type, id, x: e.clientX - r.left, y: e.clientY - r.top });
-  }, [onSelectGen]);
+    const x = e.clientX - r.left;
+    const y = e.clientY - r.top;
+    setPopups(prev => {
+      // If already open, bring to front
+      const existing = prev.find(p => p.type === type && p.id === id);
+      if (existing) {
+        return [...prev.filter(p => p !== existing), existing];
+      }
+      return [...prev, { key: ++_popupId, type, id, x: x + 10, y: y + 10 }];
+    });
+  }, []);
 
-  const closePopup = useCallback(() => { stopAdj(); setPopup(null); }, [stopAdj]);
+  const closeOnePopup = useCallback((key) => {
+    stopAdj();
+    setPopups(prev => prev.filter(p => p.key !== key));
+  }, [stopAdj]);
+
+  const onDragStart = useCallback((e, key) => {
+    e.preventDefault();
+    const r = containerRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
+    const p = popups.find(p => p.key === key);  // intentionally not in dep array - uses ref-like behavior via closure
+    if (!p) return;
+    dragRef.current = { key, offsetX: e.clientX - r.left - p.x, offsetY: e.clientY - r.top - p.y };
+  }, [popups]);
+
+  const onDragMove = useCallback((e) => {
+    if (!dragRef.current) return;
+    const r = containerRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
+    const { key, offsetX, offsetY } = dragRef.current;
+    const nx = e.clientX - r.left - offsetX;
+    const ny = e.clientY - r.top - offsetY;
+    setPopups(prev => prev.map(p => p.key === key ? { ...p, x: nx, y: ny } : p));
+  }, []);
+
+  const onDragEnd = useCallback(() => { dragRef.current = null; }, []);
 
   function sColor(s) {
     if (s === 'RUNNING') return C.green;
@@ -178,10 +211,8 @@ export default function Busbar({ selectedGen, onSelectGen }) {
   function Gen(cx, id) {
     const g = gens[id];
     const col = sColor(g?.state);
-    const sel = selectedGen === id;
     return (
       <g style={{ cursor: 'pointer' }} onClick={(e) => openPopup(e, 'gen', id)}>
-        {sel && <circle cx={cx} cy={GEN_Y} r={GEN_R + 4} fill="none" stroke={C.green} strokeWidth={1} strokeDasharray="4 3" opacity={0.7} />}
         <circle cx={cx} cy={GEN_Y} r={GEN_R} fill="none" stroke={col} strokeWidth={2.5} />
         <text x={cx} y={GEN_Y - 4} textAnchor="middle" dominantBaseline="middle"
           fill={col} fontSize="10" fontWeight="bold" fontFamily="monospace">G</text>
@@ -269,14 +300,15 @@ export default function Busbar({ selectedGen, onSelectGen }) {
     const col = conn ? C.greenDim : C.gray;
     return (
       <g style={{ cursor: 'pointer' }} onClick={(e) => openPopup(e, 'shore', 'SHORE')}>
-        <line x1={SHORE_X} y1={BUS_Y} x2={SHORE_X} y2={SHORE_Y - 25} stroke={col} strokeWidth={1.5} />
-        {Brk(SHORE_X, SHORE_Y - 25, shore.breakerState || 'OPEN', (e) => openPopup(e, 'shore', 'SHORE'))}
+        <line x1={STB_450_E} y1={SUB_BUS_Y} x2={SHORE_X} y2={SUB_BUS_Y} stroke={sb450s.live ? C.blue : C.gray} strokeWidth={2} />
+        <line x1={SHORE_X} y1={SUB_BUS_Y} x2={SHORE_X} y2={SHORE_Y - 20} stroke={col} strokeWidth={1.5} />
+        {Brk(SHORE_X, SHORE_Y - 20, shore.breakerState || 'OPEN', (e) => openPopup(e, 'shore', 'SHORE'))}
         <rect x={SHORE_X - 32} y={SHORE_Y} width={64} height={26} rx={4}
           fill={conn ? 'rgba(0,255,136,0.1)' : 'rgba(60,70,85,0.3)'} stroke={col} strokeWidth={1.5} />
         <text x={SHORE_X} y={SHORE_Y + 9} textAnchor="middle" dominantBaseline="middle"
           fill={col} fontSize="9" fontFamily="monospace" fontWeight="bold">SHORE</text>
         <text x={SHORE_X} y={SHORE_Y + 20} textAnchor="middle" dominantBaseline="middle"
-          fill={C.grayLt} fontSize="7" fontFamily="monospace">690V 60Hz</text>
+          fill={C.grayLt} fontSize="7" fontFamily="monospace">450V 60Hz</text>
       </g>
     );
   }
@@ -313,42 +345,53 @@ export default function Busbar({ selectedGen, onSelectGen }) {
     );
   }
 
-  /* ── Popup ──────────────────────────────────────────────────────── */
-  function renderPopup() {
-    if (!popup) return null;
-    const { type, id, x, y } = popup;
-    const pw = type === 'gen' ? 370 : 270;
+  /* ── Popup (multi, movable) ────────────────────────────────────── */
+  function popupTitle(type, id) {
+    if (type === 'gen') return `Generator — ${id}`;
+    if (type === 'xformer') return `Transformer — ${xformers[id]?.name || id}`;
+    if (type === 'consumer') return consumers[id]?.name || id;
+    if (type === 'maintie') return 'Main Bus-Tie';
+    if (type === 'emgtie') return 'EMG Bus-Tie';
+    if (type === 'tie450') return '450V Bus-Tie';
+    if (type === 'tie230') return '230V Bus-Tie';
+    if (type === 'shore') return 'Shore Connection';
+    return id;
+  }
+
+  function popupBody(type, id) {
+    if (type === 'gen') return GenPopup(id);
+    if (type === 'xformer') return XformerPopup(id);
+    if (type === 'consumer') return ConsumerPopup(id);
+    if (type === 'maintie') return TiePopup(mainTieClosed, ctx.setMainBusTie);
+    if (type === 'emgtie') return TiePopup(emTieClosed, ctx.setBusTie);
+    if (type === 'tie450') return TiePopup(es.busTie450?.closed ?? false, ctx.setTie450);
+    if (type === 'tie230') return TiePopup(es.busTie230?.closed ?? false, ctx.setTie230);
+    if (type === 'shore') return ShorePopup();
+    return null;
+  }
+
+  function renderPopups() {
+    if (popups.length === 0) return null;
     const cw = containerRef.current?.offsetWidth || 1000;
     const ch = containerRef.current?.offsetHeight || 600;
-    let px = Math.min(x + 10, cw - pw - 10);
-    let py = Math.min(y + 10, ch - 200);
-    if (px < 10) px = 10;
-    if (py < 10) py = 10;
-
-    return (
-      <div className="busbar-popup" style={{ left: px, top: py, width: pw, maxHeight: ch - 40, overflowY: 'auto' }}
-        onClick={(e) => e.stopPropagation()}>
-        <div className="busbar-popup__header">
-          <span className="busbar-popup__title">
-            {type === 'gen' && `Generator — ${id}`}
-            {type === 'xformer' && `Transformer — ${xformers[id]?.name || id}`}
-            {type === 'consumer' && `${consumers[id]?.name || id}`}
-            {type === 'maintie' && 'Main Bus-Tie'}
-            {type === 'emgtie' && 'EMG Bus-Tie'}
-            {type === 'shore' && 'Shore Connection'}
-          </span>
-          <button className="busbar-popup__close" onClick={closePopup}>×</button>
+    return popups.map((p) => {
+      const pw = p.type === 'gen' ? 370 : 270;
+      const px = Math.max(0, Math.min(p.x, cw - pw - 10));
+      const py = Math.max(0, Math.min(p.y, ch - 200));
+      return (
+        <div key={p.key} className="busbar-popup" style={{ left: px, top: py, width: pw, maxHeight: ch - 40, overflowY: 'auto', zIndex: 100 + p.key }}
+          onClick={(e) => e.stopPropagation()}>
+          <div className="busbar-popup__header busbar-popup__drag-handle"
+            onMouseDown={(e) => onDragStart(e, p.key)}>
+            <span className="busbar-popup__title">{popupTitle(p.type, p.id)}</span>
+            <button className="busbar-popup__close" onClick={() => closeOnePopup(p.key)}>×</button>
+          </div>
+          <div className="busbar-popup__body">
+            {popupBody(p.type, p.id)}
+          </div>
         </div>
-        <div className="busbar-popup__body">
-          {type === 'gen' && GenPopup(id)}
-          {type === 'xformer' && XformerPopup(id)}
-          {type === 'consumer' && ConsumerPopup(id)}
-          {type === 'maintie' && TiePopup(mainTieClosed, ctx.setMainBusTie)}
-          {type === 'emgtie' && TiePopup(emTieClosed, ctx.setBusTie)}
-          {type === 'shore' && ShorePopup()}
-        </div>
-      </div>
-    );
+      );
+    });
   }
 
   function GenPopup(id) {
@@ -496,7 +539,7 @@ export default function Busbar({ selectedGen, onSelectGen }) {
 
   /* ── Main SVG ───────────────────────────────────────────────────── */
   return (
-    <div className="busbar" ref={containerRef} onClick={closePopup}>
+    <div className="busbar" ref={containerRef} onMouseMove={onDragMove} onMouseUp={onDragEnd} onMouseLeave={onDragEnd}>
       <svg className="busbar__diagram" viewBox={`0 0 ${SVG_W} ${SVG_H}`}
         preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
 
@@ -613,7 +656,7 @@ export default function Busbar({ selectedGen, onSelectGen }) {
         </div>
       </div>
 
-      {popup && renderPopup()}
+      {renderPopups()}
     </div>
   );
 }

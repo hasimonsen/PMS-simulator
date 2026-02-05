@@ -456,6 +456,14 @@ export function GameProvider({ children }) {
     engineRef.current?.disconnectShore();
   }, []);
 
+  const setTie450 = useCallback((closed) => {
+    engineRef.current?.setTie450(closed);
+  }, []);
+
+  const setTie230 = useCallback((closed) => {
+    engineRef.current?.setTie230(closed);
+  }, []);
+
   // -----------------------------------------------------------------------
   // Context value
   // -----------------------------------------------------------------------
@@ -512,6 +520,8 @@ export function GameProvider({ children }) {
     closeConsumerBreaker,
     connectShore,
     disconnectShore,
+    setTie450,
+    setTie230,
   };
 
   return (

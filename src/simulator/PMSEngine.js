@@ -19,19 +19,20 @@ const DEFAULT_SETTINGS = Object.freeze({
   nominalFrequency: 60,
   generatorPoles: 10,
 
-  dg1Capacity: 1000,
-  dg2Capacity: 1000,
-  dg3Capacity: 1000,
-  dg4Capacity: 1500,
-  emgCapacity: 500,
+  dg1Capacity: 4000,
+  dg2Capacity: 4000,
+  dg3Capacity: 4000,
+  dg4Capacity: 4000,
+  emgCapacity: 1000,
 
   defaultDroop: 4,
-  governorTimeConstant: 0.8,
-  avrTimeConstant: 0.3,
+  governorTimeConstant: 2.0,
+  avrTimeConstant: 0.5,
 
-  preLubeTime: 3,
-  crankingTime: 2,
-  coolDownTime: 30,
+  preLubeTime: 180,        // 3 minutes normal pre-lube
+  preLubeTimeEmergency: 15, // 15s during blackout
+  crankingTime: 40,         // 40+ seconds cranking for big engines
+  coolDownTime: 120,        // 2 minutes cooldown
 
   syncVoltageTolerance: 15,
   syncFreqTolerance: 0.2,
@@ -51,9 +52,9 @@ const DEFAULT_SETTINGS = Object.freeze({
   blackoutDetectDelay: 2,
   emgAutoStart: true,
 
-  baseLoad: 1200,
+  baseLoad: 3000,
   loadFluctuationPercent: 2,
-  emergencyBaseLoad: 150,
+  emergencyBaseLoad: 250,
 });
 
 // ---------------------------------------------------------------------------
@@ -243,15 +244,23 @@ class PMSEngine {
       T2: { id: 'T2', name: 'Stb Crane/ROV', primaryBus: 'stbBus', secondaryBus: 'stb450Bus', ratio: 690 / 450, capacity: 500, breakerState: BreakerState.OPEN },
       T3: { id: 'T3', name: 'EMG 230V', primaryBus: 'emergencyBus', secondaryBus: 'emg230Bus', ratio: 690 / 230, capacity: 200, breakerState: BreakerState.OPEN },
       T4: { id: 'T4', name: '110V SWBD', primaryBus: 'emg230Bus', secondaryBus: 'dc110Bus', ratio: 230 / 110, capacity: 50, breakerState: BreakerState.OPEN },
+      T5: { id: 'T5', name: 'Port 230V', primaryBus: 'portBus', secondaryBus: 'port230Bus', ratio: 690 / 230, capacity: 300, breakerState: BreakerState.OPEN },
+      T6: { id: 'T6', name: 'Stb 230V', primaryBus: 'stbBus', secondaryBus: 'stb230Bus', ratio: 690 / 230, capacity: 300, breakerState: BreakerState.OPEN },
     };
 
     // Sub-buses (fed via transformers)
     this.subBuses = {
-      port450Bus: { voltage: 0, frequency: 0, live: false, nominalVoltage: 450 },
-      stb450Bus:  { voltage: 0, frequency: 0, live: false, nominalVoltage: 450 },
-      emg230Bus:  { voltage: 0, frequency: 0, live: false, nominalVoltage: 230 },
-      dc110Bus:   { voltage: 0, frequency: 0, live: false, nominalVoltage: 110 },
+      port450Bus:  { voltage: 0, frequency: 0, live: false, nominalVoltage: 450 },
+      stb450Bus:   { voltage: 0, frequency: 0, live: false, nominalVoltage: 450 },
+      port230Bus:  { voltage: 0, frequency: 0, live: false, nominalVoltage: 230 },
+      stb230Bus:   { voltage: 0, frequency: 0, live: false, nominalVoltage: 230 },
+      emg230Bus:   { voltage: 0, frequency: 0, live: false, nominalVoltage: 230 },
+      dc110Bus:    { voltage: 0, frequency: 0, live: false, nominalVoltage: 110 },
     };
+
+    // Sub-bus-ties (between port and stb at 450V and 230V levels)
+    this.busTie450 = { closed: false };
+    this.busTie230 = { closed: false };
 
     // Heavy consumers (all disabled by default for backward compat)
     this.heavyConsumers = {
@@ -265,13 +274,14 @@ class PMSEngine {
       rov2:       { id: 'rov2',       name: 'ROV 2',            bus: 'stb450Bus',  maxKw: 150, profile: 'constant',   enabled: false, breakerState: BreakerState.OPEN, currentLoad: 0, hasVSD: false },
     };
 
-    // Shore connection
+    // Shore connection (feeds stb 450V bus)
     this.shoreConnection = {
       available: true,
       breakerState: BreakerState.OPEN,
-      voltage: 690,
+      voltage: 450,
       frequency: 60,
-      maxPower: 2000,
+      maxPower: 1500,
+      bus: 'stb450Bus',
     };
 
     // Consumer load profile internal state
@@ -383,8 +393,12 @@ class PMSEngine {
       case GenState.PRE_LUBE:
         gen.rpm = 0;
         gen.voltage = 0;
-        if (gen.stateTimer >= s.preLubeTime) {
-          this._setGenState(gen, GenState.CRANKING);
+        {
+          // During blackout, use emergency (shorter) pre-lube time
+          const plubeTime = this.blackout ? s.preLubeTimeEmergency : s.preLubeTime;
+          if (gen.stateTimer >= plubeTime) {
+            this._setGenState(gen, GenState.CRANKING);
+          }
         }
         break;
 
@@ -401,10 +415,10 @@ class PMSEngine {
 
       // -- IDLE --
       case GenState.IDLE:
-        // Ramp RPM to nominal, voltage builds
+        // Ramp RPM to nominal, voltage builds (slow for big engines)
         gen.fuelCommand = chase(gen.fuelCommand, 0.15, gen.governorTau, dt);
-        gen.rpm = chase(gen.rpm, this.nominalRpm, gen.governorTau * 1.2, dt);
-        gen.voltage = chase(gen.voltage, gen.avrSetpoint, gen.avrTau * 2, dt);
+        gen.rpm = chase(gen.rpm, this.nominalRpm, gen.governorTau * 3, dt);
+        gen.voltage = chase(gen.voltage, gen.avrSetpoint, gen.avrTau * 4, dt);
         // Transition to RUNNING once voltage is above 90% nominal
         if (
           gen.rpm > this.nominalRpm * 0.95 &&
@@ -727,6 +741,7 @@ class PMSEngine {
   // Sub-bus computation (transformer secondaries)
   // -----------------------------------------------------------------------
   _computeSubBuses(dt) {
+    // 1. Compute transformer-fed sub-buses
     for (const [tId, transformer] of Object.entries(this.transformers)) {
       const subBus = this.subBuses[transformer.secondaryBus];
       if (!subBus) continue;
@@ -740,6 +755,56 @@ class PMSEngine {
         subBus.voltage = chase(subBus.voltage, 0, 0.3, dt);
         subBus.frequency = chase(subBus.frequency, 0, 0.5, dt);
         subBus.live = subBus.voltage > 10;
+      }
+    }
+
+    // 2. Shore connection feeds stb450Bus
+    if (this.shoreConnection.breakerState === BreakerState.CLOSED) {
+      const sBus = this.subBuses[this.shoreConnection.bus];
+      if (sBus) {
+        sBus.voltage = this.shoreConnection.voltage;
+        sBus.frequency = this.shoreConnection.frequency;
+        sBus.live = true;
+      }
+    }
+
+    // 3. 450V bus-tie: interconnect port450Bus and stb450Bus
+    if (this.busTie450.closed) {
+      const p = this.subBuses.port450Bus;
+      const s = this.subBuses.stb450Bus;
+      if (p.live && s.live) {
+        const avg = (p.voltage + s.voltage) / 2;
+        p.voltage = avg;
+        s.voltage = avg;
+        p.frequency = s.frequency = (p.frequency + s.frequency) / 2;
+      } else if (p.live && !s.live) {
+        s.voltage = p.voltage;
+        s.frequency = p.frequency;
+        s.live = true;
+      } else if (!p.live && s.live) {
+        p.voltage = s.voltage;
+        p.frequency = s.frequency;
+        p.live = true;
+      }
+    }
+
+    // 4. 230V bus-tie: interconnect port230Bus and stb230Bus
+    if (this.busTie230.closed) {
+      const p = this.subBuses.port230Bus;
+      const s = this.subBuses.stb230Bus;
+      if (p.live && s.live) {
+        const avg = (p.voltage + s.voltage) / 2;
+        p.voltage = avg;
+        s.voltage = avg;
+        p.frequency = s.frequency = (p.frequency + s.frequency) / 2;
+      } else if (p.live && !s.live) {
+        s.voltage = p.voltage;
+        s.frequency = p.frequency;
+        s.live = true;
+      } else if (!p.live && s.live) {
+        p.voltage = s.voltage;
+        p.frequency = s.frequency;
+        p.live = true;
       }
     }
   }
@@ -1108,17 +1173,10 @@ class PMSEngine {
       return;
     }
 
-    // If bus is live, check synchronisation conditions
+    // If bus is live, check synchronisation conditions (but allow all attempts)
     const bus = gen.isEmergency ? this.emergencyBus : this.mainBus;
     if (bus.live && !gen.isEmergency) {
       const syncResult = this._checkSync(gen);
-      if (syncResult.severity === 'block') {
-        this._addAlert(
-          'warning',
-          `${id} sync BLOCKED: ${syncResult.reason}`
-        );
-        return;
-      }
       if (syncResult.severity === 'damage') {
         this._addAlert(
           'critical',
@@ -1265,6 +1323,8 @@ class PMSEngine {
     this.stbBus.live = false;
 
     this.busTie.closed = true;
+    this.busTie450.closed = false;
+    this.busTie230.closed = false;
 
     this.emergencyBus.voltage = 0;
     this.emergencyBus.frequency = 0;
@@ -1488,6 +1548,16 @@ class PMSEngine {
     this._addAlert('info', `Main bus-tie ${closed ? 'CLOSED' : 'OPENED'}`);
   }
 
+  setTie450(closed) {
+    this.busTie450.closed = !!closed;
+    this._addAlert('info', `450V bus-tie ${closed ? 'CLOSED' : 'OPENED'}`);
+  }
+
+  setTie230(closed) {
+    this.busTie230.closed = !!closed;
+    this._addAlert('info', `230V bus-tie ${closed ? 'CLOSED' : 'OPENED'}`);
+  }
+
   // -----------------------------------------------------------------------
   // Transformer breaker controls
   // -----------------------------------------------------------------------
@@ -1501,11 +1571,7 @@ class PMSEngine {
   closeTransformerBreaker(id) {
     const t = this.transformers[id];
     if (!t) return;
-    const primaryBus = this._resolveBus(t.primaryBus);
-    if (!primaryBus || !primaryBus.live) {
-      this._addAlert('warning', `Cannot close ${t.name} breaker: primary bus dead`);
-      return;
-    }
+    // Allow closing even when primary is dead (user can make mistakes)
     t.breakerState = BreakerState.CLOSED;
     this._addAlert('info', `${t.name} transformer breaker CLOSED`);
   }
@@ -1549,14 +1615,8 @@ class PMSEngine {
       this._addAlert('warning', 'Shore connection not available');
       return;
     }
-    // Cannot connect shore if generators are online (must be dead bus)
-    const onlineGens = this._getOnlineMainGens();
-    if (onlineGens.length > 0) {
-      this._addAlert('warning', 'Cannot connect shore: generators online -- shut down first');
-      return;
-    }
     this.shoreConnection.breakerState = BreakerState.CLOSED;
-    this._addAlert('info', 'Shore connection CLOSED -- bus energized from shore');
+    this._addAlert('info', 'Shore connection CLOSED -- 450V Stb bus energized from shore');
   }
 
   disconnectShore() {
@@ -1701,6 +1761,8 @@ class PMSEngine {
       portBus: { ...this.portBus },
       stbBus: { ...this.stbBus },
       busTie: { ...this.busTie },
+      busTie450: { ...this.busTie450 },
+      busTie230: { ...this.busTie230 },
       emergencyBus: { ...this.emergencyBus },
       transformers: transformerSnapshot,
       subBuses: subBusSnapshot,
