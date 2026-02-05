@@ -1,61 +1,48 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useGame } from '../context/GameContext';
-import { useLang } from '../context/LangContext';
 
 /* ── Layout constants ─────────────────────────────────────────────── */
-const MAIN_GENS = ['DG1', 'DG2', 'DG3', 'DG4'];
 const PORT_GENS = ['DG1', 'DG2'];
 const STB_GENS = ['DG3', 'DG4'];
-const GEN_X = { DG1: 180, DG2: 380, DG3: 750, DG4: 950, EMG: 1260 };
+const GEN_X = { DG1: 250, DG2: 480, DG3: 900, DG4: 1130, EMG: 1450 };
 
-const ENGINE_Y = 28;
-const ENGINE_W = 50;
-const ENGINE_H = 26;
-const GEN_Y = 80;
-const GEN_R = 25;
-const BRK_Y = 142;
-const BRK_H = 18;
-const BUS_Y = 190;
+const ENGINE_Y = 35;
+const ENGINE_W = 58;
+const ENGINE_H = 30;
+const GEN_Y = 100;
+const GEN_R = 30;
+const BRK_Y = 165;
+const BRK_H = 20;
+const BUS_Y = 220;
 
-const PORT_BUS_START = 100;
-const PORT_BUS_END = 530;
-const STB_BUS_START = 650;
-const STB_BUS_END = 1080;
-const MAIN_TIE_X = 590;
-const EMG_TIE_X = 1130;
-const EMG_BUS_START = 1180;
-const EMG_BUS_END = 1350;
+const PORT_BUS_S = 150, PORT_BUS_E = 600;
+const STB_BUS_S = 800, STB_BUS_E = 1250;
+const MAIN_TIE_X = 700;
+const EMG_TIE_X = 1340;
+const EMG_BUS_S = 1380, EMG_BUS_E = 1530;
 
-// Below-bus elements
-const THR_ST_X = 130;
-const THR_MT_X = 270;
-const THR_BT_X = 700;
-const THR_AZ_X = 850;
-const T1_X = 470;
-const T2_X = 1020;
-const TRAFO_Y = 260;
-const SUB_BUS_Y = 325;
-const PORT_450_S = 400;
-const PORT_450_E = 530;
-const STB_450_S = 960;
-const STB_450_E = 1080;
-const CRANE1_X = 430;
-const ROV1_X = 500;
-const CRANE2_X = 990;
-const ROV2_X = 1055;
+// Below-bus
+const THR_ST_X = 180, THR_MT_X = 350;
+const THR_BT_X = 830, THR_AZ_X = 1010;
+const T1_X = 530, T2_X = 1180;
+const TRAFO_Y = 310;
+const SUB_BUS_Y = 390;
+const PORT_450_S = 460, PORT_450_E = 600;
+const STB_450_S = 1110, STB_450_E = 1250;
+const CRANE1_X = 490, ROV1_X = 570;
+const CRANE2_X = 1140, ROV2_X = 1220;
 
-const T3_X = 1220;
-const EMG_230_BUS_Y = 325;
-const EMG_230_S = 1180;
-const EMG_230_E = 1350;
-const T4_X = 1300;
-const T4_TRAFO_Y = 375;
-const DC_110_BUS_Y = 425;
+const T3_X = 1420;
+const EMG_230_BUS_Y = 390;
+const EMG_230_S = 1380, EMG_230_E = 1530;
+const T4_X = 1490;
+const T4_TRAFO_Y = 450;
+const DC_110_BUS_Y = 520;
 
-const SHORE_X = 590;
-const SHORE_Y = 440;
-const SVG_W = 1400;
-const SVG_H = 490;
+const SHORE_X = 700;
+const SHORE_Y = 500;
+const SVG_W = 1600;
+const SVG_H = 600;
 
 /* ── Colors ───────────────────────────────────────────────────────── */
 const C = {
@@ -69,9 +56,8 @@ const RPM_MIN = 680, RPM_MAX = 760, RPM_STEP = 0.5, TICK_MS = 50;
 const V_MIN = 620, V_MAX = 760;
 const SYNC_N = 24, SYNC_R = 38;
 
-export default function Busbar({ selectedGen, onSelectGen }) {
+export default function WBDView() {
   const ctx = useGame();
-  const { t } = useLang();
   const containerRef = useRef(null);
   const [popup, setPopup] = useState(null);
   const intervalRef = useRef(null);
@@ -109,10 +95,9 @@ export default function Busbar({ selectedGen, onSelectGen }) {
   /* ── Popup helpers ──────────────────────────────────────────────── */
   const openPopup = useCallback((e, type, id) => {
     e.stopPropagation();
-    if (onSelectGen) onSelectGen(id);
     const r = containerRef.current?.getBoundingClientRect() || { left: 0, top: 0 };
     setPopup({ type, id, x: e.clientX - r.left, y: e.clientY - r.top });
-  }, [onSelectGen]);
+  }, []);
 
   const closePopup = useCallback(() => { stopAdj(); setPopup(null); }, [stopAdj]);
 
@@ -123,13 +108,12 @@ export default function Busbar({ selectedGen, onSelectGen }) {
     return C.gray;
   }
   function bColor(b) { return b === 'CLOSED' ? C.green : b === 'TRIPPED' ? C.red : C.gray; }
-  function busColFor(id) { return PORT_GENS.includes(id) ? portCol : STB_GENS.includes(id) ? stbCol : emCol; }
 
   /* ── IEC Breaker ───────────────────────────────────────────────── */
   function Brk(cx, cy, state, onClick, horiz = false) {
     const col = bColor(state);
     const h = BRK_H / 2;
-    const cr = 2.5;
+    const cr = 3;
     if (horiz) {
       return (
         <g style={{ cursor: 'pointer' }} onClick={onClick}>
@@ -137,8 +121,8 @@ export default function Busbar({ selectedGen, onSelectGen }) {
           <circle cx={cx + h} cy={cy} r={cr} fill={col} />
           {state === 'CLOSED'
             ? <line x1={cx - h + cr} y1={cy} x2={cx + h - cr} y2={cy} stroke={col} strokeWidth={2.5} />
-            : <line x1={cx + h - cr} y1={cy} x2={cx - 3} y2={cy - 9} stroke={col} strokeWidth={2.5} />}
-          {state === 'TRIPPED' && <circle cx={cx} cy={cy} r={11} fill="none" stroke={C.red} strokeWidth={1.5}>
+            : <line x1={cx + h - cr} y1={cy} x2={cx - 3} y2={cy - 10} stroke={col} strokeWidth={2.5} />}
+          {state === 'TRIPPED' && <circle cx={cx} cy={cy} r={13} fill="none" stroke={C.red} strokeWidth={1.5}>
             <animate attributeName="opacity" values="1;0.2;1" dur="0.8s" repeatCount="indefinite" /></circle>}
         </g>
       );
@@ -149,8 +133,8 @@ export default function Busbar({ selectedGen, onSelectGen }) {
         <circle cx={cx} cy={cy + h} r={cr} fill={col} />
         {state === 'CLOSED'
           ? <line x1={cx} y1={cy - h + cr} x2={cx} y2={cy + h - cr} stroke={col} strokeWidth={2.5} />
-          : <line x1={cx} y1={cy + h - cr} x2={cx - 9} y2={cy - h + 2} stroke={col} strokeWidth={2.5} />}
-        {state === 'TRIPPED' && <circle cx={cx} cy={cy} r={11} fill="none" stroke={C.red} strokeWidth={1.5}>
+          : <line x1={cx} y1={cy + h - cr} x2={cx - 10} y2={cy - h + 2} stroke={col} strokeWidth={2.5} />}
+        {state === 'TRIPPED' && <circle cx={cx} cy={cy} r={13} fill="none" stroke={C.red} strokeWidth={1.5}>
           <animate attributeName="opacity" values="1;0.2;1" dur="0.8s" repeatCount="indefinite" /></circle>}
       </g>
     );
@@ -166,7 +150,7 @@ export default function Busbar({ selectedGen, onSelectGen }) {
         <rect x={cx - ENGINE_W / 2} y={ENGINE_Y - ENGINE_H / 2} width={ENGINE_W} height={ENGINE_H}
           rx={3} fill="none" stroke={col} strokeWidth={1.5} />
         <text x={cx} y={ENGINE_Y + 1} textAnchor="middle" dominantBaseline="middle"
-          fill={col} fontSize="9" fontFamily="monospace" fontWeight="bold">
+          fill={col} fontSize="10" fontFamily="monospace" fontWeight="bold">
           {id === 'EMG' ? 'EMG ENG' : 'DIESEL'}
         </text>
         <line x1={cx} y1={ENGINE_Y + ENGINE_H / 2} x2={cx} y2={GEN_Y - GEN_R} stroke={col} strokeWidth={2} />
@@ -178,15 +162,13 @@ export default function Busbar({ selectedGen, onSelectGen }) {
   function Gen(cx, id) {
     const g = gens[id];
     const col = sColor(g?.state);
-    const sel = selectedGen === id;
     return (
       <g style={{ cursor: 'pointer' }} onClick={(e) => openPopup(e, 'gen', id)}>
-        {sel && <circle cx={cx} cy={GEN_Y} r={GEN_R + 4} fill="none" stroke={C.green} strokeWidth={1} strokeDasharray="4 3" opacity={0.7} />}
         <circle cx={cx} cy={GEN_Y} r={GEN_R} fill="none" stroke={col} strokeWidth={2.5} />
-        <text x={cx} y={GEN_Y - 4} textAnchor="middle" dominantBaseline="middle"
-          fill={col} fontSize="10" fontWeight="bold" fontFamily="monospace">G</text>
+        <text x={cx} y={GEN_Y - 6} textAnchor="middle" dominantBaseline="middle"
+          fill={col} fontSize="12" fontWeight="bold" fontFamily="monospace">G</text>
         <text x={cx} y={GEN_Y + 10} textAnchor="middle" dominantBaseline="middle"
-          fill={col} fontSize="11" fontWeight="bold" fontFamily="monospace">{id}</text>
+          fill={col} fontSize="12" fontWeight="bold" fontFamily="monospace">{id}</text>
         <line x1={cx} y1={GEN_Y + GEN_R} x2={cx} y2={BRK_Y - BRK_H / 2 - 3} stroke={col} strokeWidth={2} />
       </g>
     );
@@ -197,9 +179,9 @@ export default function Busbar({ selectedGen, onSelectGen }) {
     const g = gens[id];
     if (!g) return null;
     const left = PORT_GENS.includes(id) || id === 'EMG';
-    const tx = left ? cx - GEN_R - 86 : cx + GEN_R + 4;
-    const ty = 52;
-    const w = 82, h = 52;
+    const tx = left ? cx - GEN_R - 100 : cx + GEN_R + 6;
+    const ty = 48;
+    const w = 94, h = 62;
     const bdr = g.state === 'RUNNING' ? C.greenDim : C.gray;
     const hz = (g.frequency || 0).toFixed(1);
     const kw = Math.round(g.activePower || 0);
@@ -207,18 +189,18 @@ export default function Busbar({ selectedGen, onSelectGen }) {
     const a = g.voltage > 0 ? Math.round(g.activePower * 1000 / (g.voltage * 1.732)) : 0;
     return (
       <g>
-        <rect x={tx} y={ty} width={w} height={h} rx={3} fill="rgba(10,14,23,0.9)" stroke={bdr} strokeWidth={1} />
-        <text x={tx + 4} y={ty + 13} fill={C.text} fontSize="10" fontFamily="monospace">{hz} Hz</text>
-        <text x={tx + w - 4} y={ty + 13} textAnchor="end" fill={C.text} fontSize="10" fontFamily="monospace">{kw} kW</text>
-        <text x={tx + 4} y={ty + 27} fill={C.text} fontSize="10" fontFamily="monospace">{v} V</text>
-        <text x={tx + w - 4} y={ty + 27} textAnchor="end" fill={C.text} fontSize="10" fontFamily="monospace">{a} A</text>
-        <text x={tx + 4} y={ty + 41} fill={C.grayLt} fontSize="9" fontFamily="monospace">
+        <rect x={tx} y={ty} width={w} height={h} rx={3} fill="rgba(10,14,23,0.92)" stroke={bdr} strokeWidth={1} />
+        <text x={tx + 5} y={ty + 15} fill={C.text} fontSize="11" fontFamily="monospace">{hz} Hz</text>
+        <text x={tx + w - 5} y={ty + 15} textAnchor="end" fill={C.text} fontSize="11" fontFamily="monospace">{kw} kW</text>
+        <text x={tx + 5} y={ty + 31} fill={C.text} fontSize="11" fontFamily="monospace">{v} V</text>
+        <text x={tx + w - 5} y={ty + 31} textAnchor="end" fill={C.text} fontSize="11" fontFamily="monospace">{a} A</text>
+        <text x={tx + 5} y={ty + 47} fill={C.grayLt} fontSize="10" fontFamily="monospace">
           Load: {Math.round(g.loadPercent || 0)}%
         </text>
-        {/* Fault dots: damage, tripped, running */}
-        <circle cx={tx + w - 28} cy={ty + 43} r={3} fill={g.damaged ? C.red : C.gray} />
-        <circle cx={tx + w - 17} cy={ty + 43} r={3} fill={g.breakerTripped ? C.red : C.gray} />
-        <circle cx={tx + w - 6} cy={ty + 43} r={3} fill={g.state === 'RUNNING' ? C.green : C.gray} />
+        {/* Fault dots */}
+        <circle cx={tx + w - 32} cy={ty + 53} r={3.5} fill={g.damaged ? C.red : C.gray} />
+        <circle cx={tx + w - 19} cy={ty + 53} r={3.5} fill={g.breakerTripped ? C.red : C.gray} />
+        <circle cx={tx + w - 6} cy={ty + 53} r={3.5} fill={g.state === 'RUNNING' ? C.green : C.gray} />
       </g>
     );
   }
@@ -232,15 +214,15 @@ export default function Busbar({ selectedGen, onSelectGen }) {
     const col = live ? C.greenDim : C.gray;
     return (
       <g style={{ cursor: 'pointer' }} onClick={(e) => openPopup(e, 'consumer', cId)}>
-        <line x1={cx} y1={busY} x2={cx} y2={busY + 12} stroke={col} strokeWidth={1.5} />
-        <circle cx={cx} cy={busY + 14} r={2.5} fill={bColor(c.breakerState)} />
-        <line x1={cx} y1={busY + 17} x2={cx} y2={busY + 32} stroke={col} strokeWidth={1.5} />
-        <rect x={cx - 28} y={busY + 32} width={56} height={28} rx={3}
+        <line x1={cx} y1={busY} x2={cx} y2={busY + 14} stroke={col} strokeWidth={1.5} />
+        <circle cx={cx} cy={busY + 16} r={3} fill={bColor(c.breakerState)} />
+        <line x1={cx} y1={busY + 19} x2={cx} y2={busY + 36} stroke={col} strokeWidth={1.5} />
+        <rect x={cx - 34} y={busY + 36} width={68} height={34} rx={3}
           fill={live ? 'rgba(0,255,136,0.08)' : 'rgba(60,70,85,0.2)'} stroke={col} strokeWidth={1} />
-        <text x={cx} y={busY + 43} textAnchor="middle" dominantBaseline="middle"
-          fill={col} fontSize="7.5" fontFamily="monospace" fontWeight="bold">{c.name}</text>
-        <text x={cx} y={busY + 55} textAnchor="middle" dominantBaseline="middle"
-          fill={C.grayLt} fontSize="7" fontFamily="monospace">{Math.round(c.currentLoad)} kW{c.hasVSD ? ' VSD' : ''}</text>
+        <text x={cx} y={busY + 48} textAnchor="middle" dominantBaseline="middle"
+          fill={col} fontSize="9" fontFamily="monospace" fontWeight="bold">{c.name}</text>
+        <text x={cx} y={busY + 62} textAnchor="middle" dominantBaseline="middle"
+          fill={C.grayLt} fontSize="8" fontFamily="monospace">{Math.round(c.currentLoad)} kW{c.hasVSD ? ' VSD' : ''}</text>
       </g>
     );
   }
@@ -255,10 +237,12 @@ export default function Busbar({ selectedGen, onSelectGen }) {
       <g style={{ cursor: 'pointer' }} onClick={(e) => openPopup(e, 'xformer', tId)}>
         <line x1={cx} y1={fromY} x2={cx} y2={brkY - BRK_H / 2 - 3} stroke={primCol} strokeWidth={1.5} />
         {Brk(cx, brkY, bst, (e) => openPopup(e, 'xformer', tId))}
-        <line x1={cx} y1={brkY + BRK_H / 2 + 3} x2={cx} y2={trafoY - 12}
+        <line x1={cx} y1={brkY + BRK_H / 2 + 3} x2={cx} y2={trafoY - 14}
           stroke={bst === 'CLOSED' ? primCol : C.gray} strokeWidth={1.5} />
-        <circle cx={cx} cy={trafoY - 5} r={8} fill="none" stroke={primCol} strokeWidth={1.5} />
-        <circle cx={cx} cy={trafoY + 5} r={8} fill="none" stroke={secCol} strokeWidth={1.5} />
+        <circle cx={cx} cy={trafoY - 6} r={10} fill="none" stroke={primCol} strokeWidth={1.5} />
+        <circle cx={cx} cy={trafoY + 6} r={10} fill="none" stroke={secCol} strokeWidth={1.5} />
+        <text x={cx + 16} y={trafoY} textAnchor="start" dominantBaseline="middle"
+          fill={C.grayLt} fontSize="8" fontFamily="monospace">{tf.name || tId}</text>
       </g>
     );
   }
@@ -269,14 +253,37 @@ export default function Busbar({ selectedGen, onSelectGen }) {
     const col = conn ? C.greenDim : C.gray;
     return (
       <g style={{ cursor: 'pointer' }} onClick={(e) => openPopup(e, 'shore', 'SHORE')}>
-        <line x1={SHORE_X} y1={BUS_Y} x2={SHORE_X} y2={SHORE_Y - 25} stroke={col} strokeWidth={1.5} />
-        {Brk(SHORE_X, SHORE_Y - 25, shore.breakerState || 'OPEN', (e) => openPopup(e, 'shore', 'SHORE'))}
-        <rect x={SHORE_X - 32} y={SHORE_Y} width={64} height={26} rx={4}
+        <line x1={SHORE_X} y1={BUS_Y} x2={SHORE_X} y2={SHORE_Y - 30} stroke={col} strokeWidth={1.5} />
+        {Brk(SHORE_X, SHORE_Y - 30, shore.breakerState || 'OPEN', (e) => openPopup(e, 'shore', 'SHORE'))}
+        <rect x={SHORE_X - 40} y={SHORE_Y} width={80} height={32} rx={4}
           fill={conn ? 'rgba(0,255,136,0.1)' : 'rgba(60,70,85,0.3)'} stroke={col} strokeWidth={1.5} />
-        <text x={SHORE_X} y={SHORE_Y + 9} textAnchor="middle" dominantBaseline="middle"
-          fill={col} fontSize="9" fontFamily="monospace" fontWeight="bold">SHORE</text>
-        <text x={SHORE_X} y={SHORE_Y + 20} textAnchor="middle" dominantBaseline="middle"
-          fill={C.grayLt} fontSize="7" fontFamily="monospace">690V 60Hz</text>
+        <text x={SHORE_X} y={SHORE_Y + 11} textAnchor="middle" dominantBaseline="middle"
+          fill={col} fontSize="11" fontFamily="monospace" fontWeight="bold">SHORE</text>
+        <text x={SHORE_X} y={SHORE_Y + 24} textAnchor="middle" dominantBaseline="middle"
+          fill={C.grayLt} fontSize="8" fontFamily="monospace">690V 60Hz</text>
+      </g>
+    );
+  }
+
+  /* ── Power summary panel ────────────────────────────────────────── */
+  function PowerSummary() {
+    const pLoad = Math.round(portBus.totalLoad || 0);
+    const sLoad = Math.round(stbBus.totalLoad || 0);
+    const total = Math.round(mainBus.totalLoad || 0);
+    const onGens = Object.values(gens).filter(g => !g.isEmergency && g.state === 'RUNNING' && g.breakerState === 'CLOSED');
+    const totalCap = onGens.reduce((s, g) => s + (g.capacity || 0), 0) || 1;
+    const pct = Math.min((total / totalCap) * 100, 100);
+    const barCol = pct > 90 ? C.red : pct > 70 ? C.amber : C.greenDim;
+    const px = 20, py = SVG_H - 80, pw = 200, ph = 70;
+    return (
+      <g>
+        <rect x={px} y={py} width={pw} height={ph} rx={4} fill="rgba(10,14,23,0.92)" stroke={C.gray} strokeWidth={1} />
+        <text x={px + 8} y={py + 16} fill={C.text} fontSize="10" fontFamily="monospace" fontWeight="bold">POWER SUMMARY</text>
+        <text x={px + 8} y={py + 32} fill={C.grayLt} fontSize="10" fontFamily="monospace">Port: {pLoad} kW</text>
+        <text x={px + 108} y={py + 32} fill={C.grayLt} fontSize="10" fontFamily="monospace">Stb: {sLoad} kW</text>
+        <text x={px + 8} y={py + 48} fill={C.text} fontSize="10" fontFamily="monospace">Total: {total} kW / {Math.round(totalCap)} kW</text>
+        <rect x={px + 8} y={py + 55} width={pw - 16} height={8} rx={3} fill="rgba(60,70,85,0.5)" />
+        <rect x={px + 8} y={py + 55} width={Math.max(0, (pw - 16) * pct / 100)} height={8} rx={3} fill={barCol} />
       </g>
     );
   }
@@ -483,12 +490,6 @@ export default function Busbar({ selectedGen, onSelectGen }) {
     return <button className={`busbar-popup__btn busbar-popup__btn--${c}`} onClick={onClick} disabled={disabled}>{children}</button>;
   }
 
-  /* ── Load info ──────────────────────────────────────────────────── */
-  const totalLoad = Math.round(mainBus.totalLoad || 0);
-  const onlineGens = Object.values(gens).filter(g => !g.isEmergency && g.state === 'RUNNING' && g.breakerState === 'CLOSED');
-  const totalCap = onlineGens.reduce((s, g) => s + (g.capacity || 0), 0) || 1;
-  const loadPct = Math.min((totalLoad / totalCap) * 100, 100);
-
   const sb450p = subBuses.port450Bus || {};
   const sb450s = subBuses.stb450Bus || {};
   const sb230 = subBuses.emg230Bus || {};
@@ -496,8 +497,8 @@ export default function Busbar({ selectedGen, onSelectGen }) {
 
   /* ── Main SVG ───────────────────────────────────────────────────── */
   return (
-    <div className="busbar" ref={containerRef} onClick={closePopup}>
-      <svg className="busbar__diagram" viewBox={`0 0 ${SVG_W} ${SVG_H}`}
+    <div className="wbd-view" ref={containerRef} onClick={closePopup}>
+      <svg className="wbd-view__diagram" viewBox={`0 0 ${SVG_W} ${SVG_H}`}
         preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">
 
         {/* Port generators */}
@@ -525,39 +526,39 @@ export default function Busbar({ selectedGen, onSelectGen }) {
         </g>
 
         {/* ═══ Port 690V Bus ═══ */}
-        <line x1={PORT_BUS_START} y1={BUS_Y} x2={PORT_BUS_END} y2={BUS_Y} stroke={portCol} strokeWidth={6} strokeLinecap="round" />
-        <text x={(PORT_BUS_START + PORT_BUS_END) / 2} y={BUS_Y + 16} textAnchor="middle"
-          fill={portLive ? C.greenDim : C.grayLt} fontSize="9" fontFamily="monospace" letterSpacing="1.5">PORT 690V</text>
-        <text x={(PORT_BUS_START + PORT_BUS_END) / 2} y={BUS_Y + 28} textAnchor="middle"
-          fill={C.text} fontSize="10" fontFamily="monospace">
+        <line x1={PORT_BUS_S} y1={BUS_Y} x2={PORT_BUS_E} y2={BUS_Y} stroke={portCol} strokeWidth={7} strokeLinecap="round" />
+        <text x={(PORT_BUS_S + PORT_BUS_E) / 2} y={BUS_Y - 12} textAnchor="middle"
+          fill={portLive ? C.greenDim : C.grayLt} fontSize="11" fontFamily="monospace" fontWeight="bold" letterSpacing="2">PORT 690V</text>
+        <text x={(PORT_BUS_S + PORT_BUS_E) / 2} y={BUS_Y + 18} textAnchor="middle"
+          fill={C.text} fontSize="11" fontFamily="monospace">
           {Math.round(portBus.voltage || 0)}V / {(portBus.frequency || 0).toFixed(1)}Hz
         </text>
 
         {/* Port → bus-tie → Stb */}
-        <line x1={PORT_BUS_END} y1={BUS_Y} x2={MAIN_TIE_X - 14} y2={BUS_Y} stroke={portLive ? C.greenDim : C.gray} strokeWidth={3} />
+        <line x1={PORT_BUS_E} y1={BUS_Y} x2={MAIN_TIE_X - 16} y2={BUS_Y} stroke={portLive ? C.greenDim : C.gray} strokeWidth={3} />
         {Brk(MAIN_TIE_X, BUS_Y, mainTieClosed ? 'CLOSED' : 'OPEN', (e) => openPopup(e, 'maintie', 'TIE'), true)}
-        <text x={MAIN_TIE_X} y={BUS_Y - 14} textAnchor="middle" fill={C.grayLt} fontSize="8" fontFamily="monospace">BUS TIE</text>
-        <line x1={MAIN_TIE_X + 14} y1={BUS_Y} x2={STB_BUS_START} y2={BUS_Y} stroke={stbLive ? C.greenDim : C.gray} strokeWidth={3} />
+        <text x={MAIN_TIE_X} y={BUS_Y - 16} textAnchor="middle" fill={C.grayLt} fontSize="9" fontFamily="monospace">BUS TIE</text>
+        <line x1={MAIN_TIE_X + 16} y1={BUS_Y} x2={STB_BUS_S} y2={BUS_Y} stroke={stbLive ? C.greenDim : C.gray} strokeWidth={3} />
 
         {/* ═══ Stb 690V Bus ═══ */}
-        <line x1={STB_BUS_START} y1={BUS_Y} x2={STB_BUS_END} y2={BUS_Y} stroke={stbCol} strokeWidth={6} strokeLinecap="round" />
-        <text x={(STB_BUS_START + STB_BUS_END) / 2} y={BUS_Y + 16} textAnchor="middle"
-          fill={stbLive ? C.greenDim : C.grayLt} fontSize="9" fontFamily="monospace" letterSpacing="1.5">STB 690V</text>
-        <text x={(STB_BUS_START + STB_BUS_END) / 2} y={BUS_Y + 28} textAnchor="middle"
-          fill={C.text} fontSize="10" fontFamily="monospace">
+        <line x1={STB_BUS_S} y1={BUS_Y} x2={STB_BUS_E} y2={BUS_Y} stroke={stbCol} strokeWidth={7} strokeLinecap="round" />
+        <text x={(STB_BUS_S + STB_BUS_E) / 2} y={BUS_Y - 12} textAnchor="middle"
+          fill={stbLive ? C.greenDim : C.grayLt} fontSize="11" fontFamily="monospace" fontWeight="bold" letterSpacing="2">STB 690V</text>
+        <text x={(STB_BUS_S + STB_BUS_E) / 2} y={BUS_Y + 18} textAnchor="middle"
+          fill={C.text} fontSize="11" fontFamily="monospace">
           {Math.round(stbBus.voltage || 0)}V / {(stbBus.frequency || 0).toFixed(1)}Hz
         </text>
 
         {/* Stb → EMG tie → EMG bus */}
-        <line x1={STB_BUS_END} y1={BUS_Y} x2={EMG_TIE_X - 14} y2={BUS_Y} stroke={mainLive ? C.greenDim : C.gray} strokeWidth={3} />
+        <line x1={STB_BUS_E} y1={BUS_Y} x2={EMG_TIE_X - 16} y2={BUS_Y} stroke={mainLive ? C.greenDim : C.gray} strokeWidth={3} />
         {Brk(EMG_TIE_X, BUS_Y, emTieClosed ? 'CLOSED' : 'OPEN', (e) => openPopup(e, 'emgtie', 'EMGTIE'), true)}
-        <text x={EMG_TIE_X} y={BUS_Y - 14} textAnchor="middle" fill={C.grayLt} fontSize="8" fontFamily="monospace">EMG TIE</text>
-        <line x1={EMG_TIE_X + 14} y1={BUS_Y} x2={EMG_BUS_START} y2={BUS_Y} stroke={emLive ? C.amber : C.gray} strokeWidth={3} />
+        <text x={EMG_TIE_X} y={BUS_Y - 16} textAnchor="middle" fill={C.grayLt} fontSize="9" fontFamily="monospace">EMG TIE</text>
+        <line x1={EMG_TIE_X + 16} y1={BUS_Y} x2={EMG_BUS_S} y2={BUS_Y} stroke={emLive ? C.amber : C.gray} strokeWidth={3} />
 
         {/* ═══ EMG 690V Bus ═══ */}
-        <line x1={EMG_BUS_START} y1={BUS_Y} x2={EMG_BUS_END} y2={BUS_Y} stroke={emCol} strokeWidth={5} strokeLinecap="round" />
-        <text x={(EMG_BUS_START + EMG_BUS_END) / 2} y={BUS_Y + 16} textAnchor="middle"
-          fill={emLive ? C.amber : C.grayLt} fontSize="9" fontFamily="monospace" letterSpacing="1">EMG 690V</text>
+        <line x1={EMG_BUS_S} y1={BUS_Y} x2={EMG_BUS_E} y2={BUS_Y} stroke={emCol} strokeWidth={6} strokeLinecap="round" />
+        <text x={(EMG_BUS_S + EMG_BUS_E) / 2} y={BUS_Y - 12} textAnchor="middle"
+          fill={emLive ? C.amber : C.grayLt} fontSize="10" fontFamily="monospace" fontWeight="bold" letterSpacing="1">EMG 690V</text>
 
         {/* ── Port thrusters ──── */}
         {Consumer(THR_ST_X, BUS_Y, 'thrusterST', 'portBus')}
@@ -568,50 +569,42 @@ export default function Busbar({ selectedGen, onSelectGen }) {
 
         {/* ── T1 Port → 450V ──── */}
         {Trafo(T1_X, TRAFO_Y, 'T1', BUS_Y, portCol, sb450p.live ? C.blue : C.gray)}
-        <line x1={T1_X} y1={TRAFO_Y + 13} x2={T1_X} y2={SUB_BUS_Y} stroke={sb450p.live ? C.blue : C.gray} strokeWidth={1.5} />
-        <line x1={PORT_450_S} y1={SUB_BUS_Y} x2={PORT_450_E} y2={SUB_BUS_Y} stroke={sb450p.live ? C.blue : C.gray} strokeWidth={3} strokeLinecap="round" />
-        <text x={(PORT_450_S + PORT_450_E) / 2} y={SUB_BUS_Y - 7} textAnchor="middle"
-          fill={sb450p.live ? C.blue : C.grayLt} fontSize="7" fontFamily="monospace">450V PORT</text>
+        <line x1={T1_X} y1={TRAFO_Y + 16} x2={T1_X} y2={SUB_BUS_Y} stroke={sb450p.live ? C.blue : C.gray} strokeWidth={1.5} />
+        <line x1={PORT_450_S} y1={SUB_BUS_Y} x2={PORT_450_E} y2={SUB_BUS_Y} stroke={sb450p.live ? C.blue : C.gray} strokeWidth={4} strokeLinecap="round" />
+        <text x={(PORT_450_S + PORT_450_E) / 2} y={SUB_BUS_Y - 9} textAnchor="middle"
+          fill={sb450p.live ? C.blue : C.grayLt} fontSize="8" fontFamily="monospace">450V PORT</text>
         {Consumer(CRANE1_X, SUB_BUS_Y, 'crane1', 'port450Bus')}
         {Consumer(ROV1_X, SUB_BUS_Y, 'rov1', 'port450Bus')}
 
         {/* ── T2 Stb → 450V ──── */}
         {Trafo(T2_X, TRAFO_Y, 'T2', BUS_Y, stbCol, sb450s.live ? C.blue : C.gray)}
-        <line x1={T2_X} y1={TRAFO_Y + 13} x2={T2_X} y2={SUB_BUS_Y} stroke={sb450s.live ? C.blue : C.gray} strokeWidth={1.5} />
-        <line x1={STB_450_S} y1={SUB_BUS_Y} x2={STB_450_E} y2={SUB_BUS_Y} stroke={sb450s.live ? C.blue : C.gray} strokeWidth={3} strokeLinecap="round" />
-        <text x={(STB_450_S + STB_450_E) / 2} y={SUB_BUS_Y - 7} textAnchor="middle"
-          fill={sb450s.live ? C.blue : C.grayLt} fontSize="7" fontFamily="monospace">450V STB</text>
+        <line x1={T2_X} y1={TRAFO_Y + 16} x2={T2_X} y2={SUB_BUS_Y} stroke={sb450s.live ? C.blue : C.gray} strokeWidth={1.5} />
+        <line x1={STB_450_S} y1={SUB_BUS_Y} x2={STB_450_E} y2={SUB_BUS_Y} stroke={sb450s.live ? C.blue : C.gray} strokeWidth={4} strokeLinecap="round" />
+        <text x={(STB_450_S + STB_450_E) / 2} y={SUB_BUS_Y - 9} textAnchor="middle"
+          fill={sb450s.live ? C.blue : C.grayLt} fontSize="8" fontFamily="monospace">450V STB</text>
         {Consumer(CRANE2_X, SUB_BUS_Y, 'crane2', 'stb450Bus')}
         {Consumer(ROV2_X, SUB_BUS_Y, 'rov2', 'stb450Bus')}
 
         {/* ── T3 EMG → 230V ──── */}
         {Trafo(T3_X, TRAFO_Y, 'T3', BUS_Y, emCol, sb230.live ? C.blue : C.gray)}
-        <line x1={T3_X} y1={TRAFO_Y + 13} x2={T3_X} y2={EMG_230_BUS_Y} stroke={sb230.live ? C.blue : C.gray} strokeWidth={1.5} />
-        <line x1={EMG_230_S} y1={EMG_230_BUS_Y} x2={EMG_230_E} y2={EMG_230_BUS_Y} stroke={sb230.live ? C.blue : C.gray} strokeWidth={3} strokeLinecap="round" />
-        <text x={(EMG_230_S + EMG_230_E) / 2} y={EMG_230_BUS_Y - 7} textAnchor="middle"
-          fill={sb230.live ? C.blue : C.grayLt} fontSize="7" fontFamily="monospace">230V EMG</text>
+        <line x1={T3_X} y1={TRAFO_Y + 16} x2={T3_X} y2={EMG_230_BUS_Y} stroke={sb230.live ? C.blue : C.gray} strokeWidth={1.5} />
+        <line x1={EMG_230_S} y1={EMG_230_BUS_Y} x2={EMG_230_E} y2={EMG_230_BUS_Y} stroke={sb230.live ? C.blue : C.gray} strokeWidth={4} strokeLinecap="round" />
+        <text x={(EMG_230_S + EMG_230_E) / 2} y={EMG_230_BUS_Y - 9} textAnchor="middle"
+          fill={sb230.live ? C.blue : C.grayLt} fontSize="8" fontFamily="monospace">230V EMG</text>
 
         {/* ── T4 230V → 110V ──── */}
         {Trafo(T4_X, T4_TRAFO_Y, 'T4', EMG_230_BUS_Y, sb230.live ? C.blue : C.gray, sb110.live ? C.gold : C.gray)}
-        <line x1={T4_X} y1={T4_TRAFO_Y + 13} x2={T4_X} y2={DC_110_BUS_Y} stroke={sb110.live ? C.gold : C.gray} strokeWidth={1.5} />
-        <line x1={T4_X - 40} y1={DC_110_BUS_Y} x2={T4_X + 40} y2={DC_110_BUS_Y} stroke={sb110.live ? C.gold : C.gray} strokeWidth={3} strokeLinecap="round" />
-        <text x={T4_X} y={DC_110_BUS_Y - 7} textAnchor="middle"
-          fill={sb110.live ? C.gold : C.grayLt} fontSize="7" fontFamily="monospace">110V DC</text>
+        <line x1={T4_X} y1={T4_TRAFO_Y + 16} x2={T4_X} y2={DC_110_BUS_Y} stroke={sb110.live ? C.gold : C.gray} strokeWidth={1.5} />
+        <line x1={T4_X - 50} y1={DC_110_BUS_Y} x2={T4_X + 50} y2={DC_110_BUS_Y} stroke={sb110.live ? C.gold : C.gray} strokeWidth={4} strokeLinecap="round" />
+        <text x={T4_X} y={DC_110_BUS_Y - 9} textAnchor="middle"
+          fill={sb110.live ? C.gold : C.grayLt} fontSize="8" fontFamily="monospace">110V DC</text>
 
         {/* ── Shore connection ──── */}
         {Shore()}
-      </svg>
 
-      {/* Load bar */}
-      <div className="busbar__load-demand">
-        <span className="busbar__load-demand-label">Total Load: {totalLoad} kW</span>
-        <div className="busbar__load-demand-bar">
-          <div className="busbar__load-demand-fill" style={{
-            width: `${loadPct}%`,
-            backgroundColor: loadPct > 90 ? C.redDim : loadPct > 70 ? C.amber : C.greenDim,
-          }} />
-        </div>
-      </div>
+        {/* ── Power summary ──── */}
+        {PowerSummary()}
+      </svg>
 
       {popup && renderPopup()}
     </div>
