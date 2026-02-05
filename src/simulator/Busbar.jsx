@@ -21,8 +21,14 @@ const EMG_BUS_START = 800;
 const EMG_BUS_END = 1000;
 const LOAD_Y = 215;
 
+const TRAFO_X = 840;
+const TRAFO_Y = 245;
+const BUS_230_Y = 290;
+const BUS_230_START = 800;
+const BUS_230_END = 1000;
+
 const SVG_W = 1060;
-const SVG_H = 270;
+const SVG_H = 340;
 
 /* ── Colors ───────────────────────────────────────────────────────── */
 const C_GREEN = '#00ff88';
@@ -252,31 +258,61 @@ export default function Busbar({ selectedGen, onSelectGen }) {
     );
   }
 
-  /* ── SVG: Emergency loads ───────────────────────────────────────── */
-  function renderEmergencyLoads() {
-    const loads = [
-      { name: 'LTG', x: 840 },
-      { name: 'NAV', x: 910 },
-      { name: 'STR', x: 980 },
+  /* ── SVG: Transformer + 230V bus ──────────────────────────────── */
+  function renderTransformerAndBus230() {
+    const trafoColor = emBusLive ? C_AMBER : C_GRAY;
+    const bus230Color = emBusLive ? '#88ccff' : C_GRAY;
+    const loads230 = [
+      { name: 'LTG', x: 850 },
+      { name: 'NAV', x: 920 },
+      { name: 'STR', x: 990 },
     ];
-    return loads.map(({ name, x }) => (
-      <g key={name}>
-        <line x1={x} y1={BUS_Y} x2={x} y2={LOAD_Y} stroke={emBusLive ? C_AMBER : C_GRAY} strokeWidth={1.5} />
-        <rect
-          x={x - 16} y={LOAD_Y}
-          width={32} height={18}
-          rx={2} fill={emBusLive ? 'rgba(255,170,0,0.15)' : 'rgba(60,70,85,0.3)'}
-          stroke={emBusLive ? C_AMBER : C_GRAY} strokeWidth={1}
-        />
-        <text
-          x={x} y={LOAD_Y + 10}
-          textAnchor="middle" dominantBaseline="middle"
-          fill={emBusLive ? C_AMBER : C_GRAY} fontSize="8" fontFamily="monospace" fontWeight="bold"
-        >
-          {name}
+    return (
+      <g>
+        {/* Connection from EMG bus down to transformer */}
+        <line x1={TRAFO_X} y1={BUS_Y} x2={TRAFO_X} y2={TRAFO_Y - 14}
+          stroke={trafoColor} strokeWidth={1.5} />
+        {/* Transformer symbol: two overlapping circles */}
+        <circle cx={TRAFO_X} cy={TRAFO_Y - 6} r={10}
+          fill="none" stroke={trafoColor} strokeWidth={1.5} />
+        <circle cx={TRAFO_X} cy={TRAFO_Y + 6} r={10}
+          fill="none" stroke={bus230Color} strokeWidth={1.5} />
+        {/* Labels */}
+        <text x={TRAFO_X + 16} y={TRAFO_Y - 4} fill={trafoColor}
+          fontSize="7" fontFamily="monospace">690V</text>
+        <text x={TRAFO_X + 16} y={TRAFO_Y + 8} fill={bus230Color}
+          fontSize="7" fontFamily="monospace">230V</text>
+
+        {/* Connection from transformer to 230V bus */}
+        <line x1={TRAFO_X} y1={TRAFO_Y + 16} x2={TRAFO_X} y2={BUS_230_Y}
+          stroke={bus230Color} strokeWidth={1.5} />
+
+        {/* 230V Bus line */}
+        <line x1={BUS_230_START} y1={BUS_230_Y} x2={BUS_230_END} y2={BUS_230_Y}
+          stroke={bus230Color} strokeWidth={3} strokeLinecap="round" />
+        <text x={(BUS_230_START + BUS_230_END) / 2} y={BUS_230_Y - 8}
+          textAnchor="middle" fill={bus230Color} fontSize="8" fontFamily="monospace"
+          letterSpacing="1.5" opacity={0.8}>
+          230V EMG SWITCHBOARD
         </text>
+
+        {/* 230V loads */}
+        {loads230.map(({ name, x }) => (
+          <g key={name}>
+            <line x1={x} y1={BUS_230_Y} x2={x} y2={BUS_230_Y + 25}
+              stroke={emBusLive ? bus230Color : C_GRAY} strokeWidth={1.5} />
+            <rect x={x - 18} y={BUS_230_Y + 25} width={36} height={18} rx={2}
+              fill={emBusLive ? 'rgba(136,204,255,0.12)' : 'rgba(60,70,85,0.3)'}
+              stroke={emBusLive ? bus230Color : C_GRAY} strokeWidth={1} />
+            <text x={x} y={BUS_230_Y + 35}
+              textAnchor="middle" dominantBaseline="middle"
+              fill={emBusLive ? bus230Color : C_GRAY} fontSize="8" fontFamily="monospace" fontWeight="bold">
+              {name}
+            </text>
+          </g>
+        ))}
       </g>
-    ));
+    );
   }
 
   /* ── Popup content ──────────────────────────────────────────────── */
@@ -286,11 +322,11 @@ export default function Busbar({ selectedGen, onSelectGen }) {
     const gen = gens[genId];
 
     // Clamp popup position to stay visible
-    const popupW = 220;
+    const popupW = 280;
     const containerW = containerRef.current?.offsetWidth || 800;
     const containerH = containerRef.current?.offsetHeight || 400;
     let px = Math.min(x + 10, containerW - popupW - 10);
-    let py = Math.min(y + 10, containerH - 200);
+    let py = Math.min(y + 10, containerH - 260);
     if (px < 10) px = 10;
     if (py < 10) py = 10;
 
@@ -616,8 +652,8 @@ export default function Busbar({ selectedGen, onSelectGen }) {
           );
         })()}
 
-        {/* ── Emergency loads ───────────────────────── */}
-        {renderEmergencyLoads()}
+        {/* ── Transformer + 230V switchboard ──────── */}
+        {renderTransformerAndBus230()}
       </svg>
 
       {/* ── Load demand bar ───────────────────────── */}

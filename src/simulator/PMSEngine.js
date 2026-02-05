@@ -14,7 +14,7 @@ const TWO_PI = 2 * Math.PI;
 // Default settings
 // ---------------------------------------------------------------------------
 const DEFAULT_SETTINGS = Object.freeze({
-  nominalVoltage: 440,
+  nominalVoltage: 690,
   nominalFrequency: 60,
   generatorPoles: 10,
 
@@ -32,14 +32,14 @@ const DEFAULT_SETTINGS = Object.freeze({
   crankingTime: 2,
   coolDownTime: 30,
 
-  syncVoltageTolerance: 10,
+  syncVoltageTolerance: 15,
   syncFreqTolerance: 0.2,
   syncPhaseTolerance: 10,
 
   underFreqTrip: 55,
   overFreqTrip: 65,
-  underVoltTrip: 380,
-  overVoltTrip: 480,
+  underVoltTrip: 590,
+  overVoltTrip: 760,
   reversePowerTrip: -5,
 
   overcurrentPercent: 120,

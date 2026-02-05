@@ -2,160 +2,126 @@ import React from 'react';
 import { useGame } from '../context/GameContext';
 import { useLang } from '../context/LangContext';
 
-const DIAL_RADIUS = 90;
-const DIAL_CX = 100;
-const DIAL_CY = 100;
-const NEEDLE_LENGTH = 70;
-const GREEN_ZONE_DEG = 10; // +/- degrees for green zone at 12 o'clock
-const TICK_COUNT = 36; // every 10 degrees
-const MAJOR_TICK_INTERVAL = 3; // every 30 degrees is major
+/**
+ * DEIF CSQ-3 style LED ring synchroscope.
+ * Ring of LEDs rotates based on phase difference.
+ * 12 o'clock = in sync. CW = too fast, CCW = too slow.
+ */
+const LED_COUNT = 36;
+const RING_R = 72;
+const CX = 105;
+const CY = 105;
+const LED_R = 4.5;
+const SVG_SIZE = 210;
 
 export default function Synchroscope({ genId }) {
   const { engineState } = useGame();
   const { t } = useLang();
 
-  // Read pre-computed synchroscope data from engine state.
-  // The synchroscope entry only exists when the generator is RUNNING,
-  // its breaker is OPEN, and the bus is live.
   const syncData = engineState?.synchroscopes?.[genId];
-
   const deltaF = syncData?.freqDiff ?? 0;
   const deltaV = syncData?.voltageDiff ?? 0;
   const needleAngleDeg = syncData?.needleAngleDeg ?? 0;
   const isSyncReady = syncData?.inWindow ?? false;
+  const isActive = !!syncData;
 
-  // Generate tick marks
-  const ticks = [];
-  for (let i = 0; i < TICK_COUNT; i++) {
-    const angleDeg = (i * 360) / TICK_COUNT - 90; // offset so 0 = top
+  const activeLedIdx = isActive
+    ? Math.round(((needleAngleDeg % 360 + 360) % 360) / (360 / LED_COUNT)) % LED_COUNT
+    : -1;
+
+  const voltageTooHigh = isActive && deltaV > 15;
+  const voltageTooLow = isActive && deltaV < -15;
+
+  const leds = [];
+  for (let i = 0; i < LED_COUNT; i++) {
+    const angleDeg = (i * 360) / LED_COUNT - 90;
     const angleRad = (angleDeg * Math.PI) / 180;
-    const isMajor = i % MAJOR_TICK_INTERVAL === 0;
-    const innerR = isMajor ? DIAL_RADIUS - 15 : DIAL_RADIUS - 8;
-    const outerR = DIAL_RADIUS - 2;
+    const x = CX + RING_R * Math.cos(angleRad);
+    const y = CY + RING_R * Math.sin(angleRad);
+    const isLit = i === activeLedIdx;
+    const inSyncZone = i <= 2 || i >= LED_COUNT - 2;
 
-    ticks.push(
-      <line
-        key={`tick-${i}`}
-        x1={DIAL_CX + innerR * Math.cos(angleRad)}
-        y1={DIAL_CY + innerR * Math.sin(angleRad)}
-        x2={DIAL_CX + outerR * Math.cos(angleRad)}
-        y2={DIAL_CY + outerR * Math.sin(angleRad)}
-        stroke={isMajor ? '#ccc' : '#777'}
-        strokeWidth={isMajor ? 2 : 1}
+    leds.push(
+      <circle
+        key={i}
+        cx={x} cy={y}
+        r={isLit ? LED_R + 1 : LED_R}
+        fill={isLit ? (inSyncZone ? '#00ff88' : '#ff3333') : '#4a2020'}
+        stroke={isLit ? (inSyncZone ? '#00ff88' : '#ff3333') : '#333'}
+        strokeWidth={isLit ? 1.5 : 0.5}
+        style={isLit ? { filter: `drop-shadow(0 0 4px ${inSyncZone ? '#00ff88' : '#ff3333'})` } : undefined}
       />
     );
   }
-
-  // Green zone arc at top (12 o'clock)
-  const greenStartDeg = -90 - GREEN_ZONE_DEG;
-  const greenEndDeg = -90 + GREEN_ZONE_DEG;
-  const greenStartRad = (greenStartDeg * Math.PI) / 180;
-  const greenEndRad = (greenEndDeg * Math.PI) / 180;
-  const arcR = DIAL_RADIUS - 4;
-  const greenArcPath = [
-    `M ${DIAL_CX + arcR * Math.cos(greenStartRad)} ${DIAL_CY + arcR * Math.sin(greenStartRad)}`,
-    `A ${arcR} ${arcR} 0 0 1 ${DIAL_CX + arcR * Math.cos(greenEndRad)} ${DIAL_CY + arcR * Math.sin(greenEndRad)}`,
-  ].join(' ');
-
-  // Needle endpoint
-  const needleRad = ((needleAngleDeg - 90) * Math.PI) / 180;
-  const needleX = DIAL_CX + NEEDLE_LENGTH * Math.cos(needleRad);
-  const needleY = DIAL_CY + NEEDLE_LENGTH * Math.sin(needleRad);
-
-  // "FAST" and "SLOW" labels
-  const fastLabelRad = ((90 - 90) * Math.PI) / 180; // 3 o'clock = 90deg CW from top
-  const slowLabelRad = ((-90 - 90) * Math.PI) / 180; // 9 o'clock
 
   return (
     <div className="synchroscope">
       <div className="synchroscope__title">{t('synchroscope')} - {genId}</div>
 
-      <svg
-        className="synchroscope__dial"
-        viewBox="0 0 200 200"
-        width="200"
-        height="200"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        {/* Dark face background */}
-        <circle
-          cx={DIAL_CX}
-          cy={DIAL_CY}
-          r={DIAL_RADIUS}
-          fill="#1a1a2e"
-          stroke="#444"
-          strokeWidth={3}
-        />
+      <div className="synchroscope__face">
+        <svg viewBox={`0 0 ${SVG_SIZE} ${SVG_SIZE}`} width="100%"
+          preserveAspectRatio="xMidYMid meet" className="synchroscope__svg">
+          {/* Cream face */}
+          <rect x="0" y="0" width={SVG_SIZE} height={SVG_SIZE} rx="8" fill="#f5f0e8" />
+          <rect x="3" y="3" width={SVG_SIZE - 6} height={SVG_SIZE - 6} rx="6"
+            fill="none" stroke="#333" strokeWidth="3" />
 
-        {/* Green zone arc */}
-        <path
-          d={greenArcPath}
-          fill="none"
-          stroke="rgba(92, 184, 92, 0.7)"
-          strokeWidth={8}
-          strokeLinecap="round"
-        />
+          {/* Direction arcs */}
+          <path d={`M ${CX - 50} ${CY - 28} A 50 50 0 0 1 ${CX - 12} ${CY - 50}`}
+            fill="none" stroke="#222" strokeWidth="2" markerEnd="url(#arr)" />
+          <path d={`M ${CX + 50} ${CY - 28} A 50 50 0 0 0 ${CX + 12} ${CY - 50}`}
+            fill="none" stroke="#222" strokeWidth="2" markerEnd="url(#arr)" />
+          <defs>
+            <marker id="arr" markerWidth="6" markerHeight="4" refX="5" refY="2" orient="auto">
+              <polygon points="0 0, 6 2, 0 4" fill="#222" />
+            </marker>
+          </defs>
 
-        {/* Tick marks */}
-        {ticks}
+          <text x={CX - 62} y={CY - 42} textAnchor="middle" fill="#222"
+            fontSize="10" fontWeight="bold" fontFamily="Arial">TOO FAST</text>
+          <text x={CX + 62} y={CY - 42} textAnchor="middle" fill="#222"
+            fontSize="10" fontWeight="bold" fontFamily="Arial">TOO SLOW</text>
 
-        {/* FAST / SLOW labels */}
-        <text
-          x={DIAL_CX + 35}
-          y={DIAL_CY + 5}
-          textAnchor="middle"
-          fill="#aaa"
-          fontSize="10"
-          fontFamily="monospace"
-        >
-          FAST
-        </text>
-        <text
-          x={DIAL_CX - 35}
-          y={DIAL_CY + 5}
-          textAnchor="middle"
-          fill="#aaa"
-          fontSize="10"
-          fontFamily="monospace"
-        >
-          SLOW
-        </text>
+          {/* SYNC marker */}
+          <text x={CX} y={16} textAnchor="middle" fill="#222"
+            fontSize="10" fontWeight="bold" fontFamily="Arial">SYNC</text>
+          <polygon points={`${CX - 5},20 ${CX + 5},20 ${CX},27`} fill="#222" />
 
-        {/* 12 o'clock marker triangle */}
-        <polygon
-          points={`${DIAL_CX},${DIAL_CY - DIAL_RADIUS + 1} ${DIAL_CX - 5},${DIAL_CY - DIAL_RADIUS - 8} ${DIAL_CX + 5},${DIAL_CY - DIAL_RADIUS - 8}`}
-          fill="#5cb85c"
-        />
+          {/* LED ring */}
+          {leds}
 
-        {/* Needle */}
-        <line
-          x1={DIAL_CX}
-          y1={DIAL_CY}
-          x2={needleX}
-          y2={needleY}
-          stroke="#ff6b35"
-          strokeWidth={3}
-          strokeLinecap="round"
-          style={{
-            transition: Math.abs(deltaF) > 0.5 ? 'none' : 'all 0.1s linear',
-          }}
-        />
+          {/* φOK */}
+          <polygon points={`${CX - 5},${CY - 32} ${CX + 5},${CY - 32} ${CX},${CY - 25}`}
+            fill={isSyncReady ? '#00cc44' : '#888'} />
+          <text x={CX + 12} y={CY - 25} fill="#222"
+            fontSize="9" fontWeight="bold" fontFamily="Arial">φOK</text>
 
-        {/* Needle center dot */}
-        <circle cx={DIAL_CX} cy={DIAL_CY} r={5} fill="#ff6b35" />
+          {/* UGEN indicators */}
+          <text x={32} y={CY + 45} fill="#222" fontSize="8" fontFamily="Arial">
+            U<tspan fontSize="6" dy="2">GEN</tspan>
+          </text>
+          <circle cx={32} cy={CY + 55} r={4.5}
+            fill={voltageTooHigh ? '#ff3333' : '#4a2020'} stroke="#333" strokeWidth={0.5} />
+          <text x={42} y={CY + 58} fill="#222" fontSize="8" fontWeight="bold" fontFamily="Arial">TOO HIGH</text>
+          <circle cx={32} cy={CY + 70} r={4.5}
+            fill={voltageTooLow ? '#ff3333' : '#4a2020'} stroke="#333" strokeWidth={0.5} />
+          <text x={42} y={CY + 73} fill="#222" fontSize="8" fontWeight="bold" fontFamily="Arial">TOO LOW</text>
 
-        {/* Outer ring decoration */}
-        <circle
-          cx={DIAL_CX}
-          cy={DIAL_CY}
-          r={DIAL_RADIUS}
-          fill="none"
-          stroke="#555"
-          strokeWidth={1}
-        />
-      </svg>
+          {/* Label */}
+          <text x={CX + 25} y={CY + 62} textAnchor="middle" fill="#222"
+            fontSize="9" fontWeight="bold" fontFamily="Arial">SYNCHROSCOPE</text>
+          <text x={CX + 25} y={CY + 73} textAnchor="middle" fill="#666"
+            fontSize="7" fontStyle="italic" fontFamily="Arial">CSQ-3</text>
 
-      {/* Digital readouts */}
+          {/* DEIF badge */}
+          <rect x={SVG_SIZE - 48} y={SVG_SIZE - 24} width="38" height="14" rx="1"
+            fill="#222" stroke="#000" strokeWidth="0.5" />
+          <text x={SVG_SIZE - 29} y={SVG_SIZE - 14} textAnchor="middle" fill="#fff"
+            fontSize="8" fontWeight="bold" fontFamily="Arial">DEIF</text>
+        </svg>
+      </div>
+
+      {/* Readouts */}
       <div className="synchroscope__readouts">
         <div className="synchroscope__readout">
           <span className="synchroscope__readout-label">{t('freqDiff')}</span>
@@ -177,14 +143,9 @@ export default function Synchroscope({ genId }) {
         </div>
       </div>
 
-      {/* Sync ready indicator */}
-      <div
-        className={`synchroscope__status ${
-          isSyncReady
-            ? 'synchroscope__status--ready'
-            : 'synchroscope__status--not-ready'
-        }`}
-      >
+      <div className={`synchroscope__status ${
+        isSyncReady ? 'synchroscope__status--ready' : 'synchroscope__status--not-ready'
+      }`}>
         {isSyncReady ? t('syncReady') : t('syncNotReady')}
       </div>
     </div>

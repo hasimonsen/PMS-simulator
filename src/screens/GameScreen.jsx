@@ -6,8 +6,9 @@ import HUD from '../components/HUD';
 import PMSSimulator from '../simulator/PMSSimulator';
 
 export default function GameScreen() {
-  const { isPaused, resumeGame, quitGame, alerts } = useGame();
+  const { isPaused, resumeGame, quitGame, alerts, taskBriefingOpen, dismissBriefing, taskProgress } = useGame();
   const { t } = useLang();
+  const briefingTask = taskProgress?.currentTask;
 
   return (
     <div className="game-screen" style={styles.container}>
@@ -42,6 +43,19 @@ export default function GameScreen() {
           </div>
         ))}
       </div>
+
+      {/* Task briefing overlay */}
+      {taskBriefingOpen && briefingTask && (
+        <div style={styles.pauseOverlay}>
+          <div style={styles.briefingModal}>
+            <h2 style={styles.briefingTitle}>{t(briefingTask.nameKey)}</h2>
+            <p style={styles.briefingDesc}>{t(briefingTask.descKey)}</p>
+            <button onClick={dismissBriefing} style={styles.briefingBtn}>
+              START
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Pause overlay */}
       {isPaused && (
@@ -179,5 +193,45 @@ const styles = {
     textTransform: 'uppercase',
     letterSpacing: 1,
     fontFamily: 'inherit',
+  },
+  briefingModal: {
+    background: '#131920',
+    borderRadius: 16,
+    padding: '48px 56px',
+    textAlign: 'center',
+    border: '1px solid rgba(0, 255, 136, 0.25)',
+    boxShadow: '0 8px 48px rgba(0,0,0,0.7), 0 0 30px rgba(0,255,136,0.08)',
+    maxWidth: 520,
+    width: '90%',
+  },
+  briefingTitle: {
+    fontSize: 28,
+    fontWeight: 700,
+    color: '#00ff88',
+    margin: '0 0 20px 0',
+    textTransform: 'uppercase',
+    letterSpacing: 2,
+    fontFamily: "'Courier New', monospace",
+  },
+  briefingDesc: {
+    fontSize: 18,
+    color: '#c8d6e5',
+    margin: '0 0 32px 0',
+    lineHeight: 1.6,
+    fontFamily: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
+  },
+  briefingBtn: {
+    padding: '16px 56px',
+    fontSize: 20,
+    fontWeight: 700,
+    borderRadius: 8,
+    border: '2px solid #00ff88',
+    background: 'rgba(0, 255, 136, 0.1)',
+    color: '#00ff88',
+    cursor: 'pointer',
+    textTransform: 'uppercase',
+    letterSpacing: 2,
+    fontFamily: "'Courier New', monospace",
+    transition: 'all 0.2s',
   },
 };

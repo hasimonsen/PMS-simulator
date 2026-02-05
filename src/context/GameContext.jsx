@@ -93,6 +93,7 @@ export function GameProvider({ children }) {
   const [alerts, setAlerts] = useState([]);
   const [unlockedLevels, setUnlockedLevels] = useState([1]);
   const [taskElapsed, setTaskElapsed] = useState(0);
+  const [taskBriefingOpen, setTaskBriefingOpen] = useState(false);
 
   // ---- Load persisted progress on mount ----
   useEffect(() => {
@@ -277,9 +278,14 @@ export function GameProvider({ children }) {
         taskManager.setupTask(engine);
       }
 
-      taskStartTimeRef.current = Date.now();
+      taskStartTimeRef.current = null; // Wait for briefing dismiss
       setTaskElapsed(0);
-      addAlert(`Level ${nextTask.level || nextTask.id} started!`, 'success');
+      // Pause loop and show briefing for next task
+      if (loopRef.current) {
+        clearInterval(loopRef.current);
+        loopRef.current = null;
+      }
+      setTaskBriefingOpen(true);
     } else {
       // No more tasks – game complete
       stopLoop();
@@ -319,7 +325,7 @@ export function GameProvider({ children }) {
     setGameOverReason(null);
     setAlerts([]);
     setTaskElapsed(0);
-    taskStartTimeRef.current = Date.now();
+    taskStartTimeRef.current = null; // Don't start timer yet
     busHasBeenLiveRef.current = false;
 
     // Take initial snapshot
@@ -328,6 +334,12 @@ export function GameProvider({ children }) {
     setTaskProgress(taskManager.getProgress());
 
     setScreen('game');
+    setTaskBriefingOpen(true); // Show briefing first
+  }, []);
+
+  const dismissBriefing = useCallback(() => {
+    setTaskBriefingOpen(false);
+    taskStartTimeRef.current = Date.now();
     startLoop();
   }, [startLoop]);
 
@@ -426,6 +438,7 @@ export function GameProvider({ children }) {
     alerts,
     unlockedLevels,
     taskElapsed,
+    taskBriefingOpen,
 
     // Navigation & identity
     setScreen,
@@ -433,6 +446,7 @@ export function GameProvider({ children }) {
 
     // Game lifecycle
     startGame,
+    dismissBriefing,
     pauseGame,
     resumeGame,
     quitGame,

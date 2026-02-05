@@ -2,8 +2,8 @@ import React from 'react';
 import { useGame } from '../context/GameContext';
 import { useLang } from '../context/LangContext';
 
-const VOLTAGE_MIN = 400;
-const VOLTAGE_MAX = 480;
+const VOLTAGE_MIN = 620;
+const VOLTAGE_MAX = 760;
 
 export default function AVRPanel({ genId }) {
   const { engineState, setAvrSetpoint } = useGame();
@@ -11,7 +11,7 @@ export default function AVRPanel({ genId }) {
 
   const gen = engineState?.generators?.[genId];
 
-  const voltageSetpoint = gen?.avrSetpoint ?? 440;
+  const voltageSetpoint = gen?.avrSetpoint ?? 690;
   const voltage = gen?.voltage || 0;
   const reactivePower = gen?.reactivePower || 0;
   const activePower = gen?.activePower || 0;
